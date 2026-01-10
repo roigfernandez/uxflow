@@ -1,0 +1,567 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FlowForge | Generador de Flujos UX/UI</title>
+    
+    <!-- PWA Meta Tags -->
+    <meta name="application-name" content="FlowForge">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="FlowForge">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="theme-color" content="#6366f1">
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0f172a">
+    
+    <!-- PWA Manifest -->
+    <link rel="manifest" href="manifest.json">
+    
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Performance optimizations -->
+    <link rel="dns-prefetch" href="https://api.anthropic.com">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <!-- PWA Install Banner -->
+    <div id="install-banner" class="install-banner" style="display: none;">
+        <div class="install-banner-content">
+            <div class="install-banner-icon">📱</div>
+            <div class="install-banner-text">
+                <strong>Instalar FlowForge</strong>
+                <span>Accede más rápido y trabaja sin conexión</span>
+            </div>
+            <button id="install-btn" class="install-banner-btn">Instalar</button>
+            <button id="install-close" class="install-banner-close">✕</button>
+        </div>
+    </div>
+    
+    <!-- Offline Indicator -->
+    <div id="offline-indicator" class="offline-indicator" style="display: none;">
+        <span class="offline-icon">📡</span>
+        <span class="offline-text">Sin conexión - Modo offline activado</span>
+    </div>
+    
+    <a href="#main-content" class="skip-link">Saltar al contenido principal</a>
+    <div class="app-container">
+        <!-- Sidebar -->
+        <aside class="sidebar" id="sidebar" role="navigation" aria-label="Navegación principal">
+            <div class="logo">
+                <h1>FlowForge
+                    <span>Generador UX/UI v1.0</span>
+                </h1>
+            </div>
+
+            <div class="api-key-section">
+                <label class="api-key-label" for="apiKeyInput">API Key de Claude (opcional)</label>
+                <input type="password" class="api-key-input" id="apiKeyInput" placeholder="sk-ant-...">
+            </div>
+
+            <button class="new-project-btn" onclick="createNewProject()">
+                <span>＋</span> Nuevo Proyecto
+            </button>
+
+            <div class="search-container">
+                <input type="text" class="search-input" id="projectSearch" placeholder="🔍 Buscar proyectos...">
+                <div class="filter-controls">
+                    <button class="filter-btn active" data-category="all" onclick="filterProjects('all')">Todos</button>
+                    <button class="filter-btn" data-category="fintech" onclick="filterProjects('fintech')">Fintech</button>
+                    <button class="filter-btn" data-category="healthtech" onclick="filterProjects('healthtech')">Health</button>
+                    <button class="filter-btn" data-category="edtech" onclick="filterProjects('edtech')">EdTech</button>
+                </div>
+            </div>
+
+            <div class="projects-list">
+                <div class="projects-header">Proyectos Guardados</div>
+                <div id="projectsList"></div>
+            </div>
+
+            <div class="sidebar-footer">
+                <div style="display: flex; align-items: center; justify-content: center; gap: 8px;">
+                    <span class="status-indicator"></span>
+                    Autosave activo • Máx 10 proyectos
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content" id="main-content" role="main">
+            <header class="header" role="banner">
+                <button class="mobile-menu-btn" onclick="toggleSidebar()">☰</button>
+                <h2 class="header-title" id="headerTitle">Bienvenido a FlowForge</h2>
+                <div class="header-actions">
+                    <div class="undo-redo-controls" id="undoRedoControls" style="display: none;">
+                        <button class="undo-redo-btn" id="undoBtn" onclick="undoChange()" title="Deshacer (Ctrl+Z)" data-tooltip="Deshacer cambio" disabled>↶</button>
+                        <button class="undo-redo-btn" id="redoBtn" onclick="redoChange()" title="Rehacer (Ctrl+Y)" data-tooltip="Rehacer cambio" disabled>↷</button>
+                    </div>
+                    <span class="save-indicator" id="saveIndicator"></span>
+                    <div class="theme-toggle" onclick="toggleTheme()" title="Cambiar tema" data-tooltip="Alternar modo claro/oscuro" aria-label="Cambiar tema">
+                        <span class="theme-toggle-icon sun">☀️</span>
+                        <span class="theme-toggle-icon moon">🌙</span>
+                        <div class="theme-toggle-slider"></div>
+                    </div>
+                    <button class="header-btn" onclick="showVersions()" id="versionsBtn" style="display: none;" aria-label="Gestionar versiones" data-tooltip="Control de versiones del proyecto">
+                        🕐 Versiones
+                    </button>
+                    <button class="header-btn" onclick="showShareDialog()" id="shareBtn" style="display: none;" aria-label="Compartir proyecto" data-tooltip="Compartir o exportar proyecto">
+                        🔗 Compartir
+                    </button>
+                    <button class="header-btn" onclick="exportProject()" id="exportBtn" style="display: none;" aria-label="Exportar proyecto" data-tooltip="Descargar proyecto en JSON">
+                        ↓ Exportar
+                    </button>
+                    <button class="header-btn primary" onclick="saveCurrentProject()" id="saveBtn" style="display: none;" aria-label="Guardar proyecto" data-tooltip="Guardar cambios (Ctrl+S)">
+                        ✓ Guardar
+                    </button>
+                </div>
+            </header>
+
+            <div class="content-area">
+                <!-- Welcome Screen -->
+                <div class="welcome-screen" id="welcomeScreen">
+                    <div class="welcome-icon">◈</div>
+                    <h2 class="welcome-title">Crea flujos UX/UI profesionales</h2>
+                    <p class="welcome-subtitle">Genera especificaciones completas de diseño, flujos de pantalla y métricas de éxito para tu aplicación con un solo clic.</p>
+                    <button class="new-project-btn" onclick="createNewProject()">
+                        <span>＋</span> Crear mi primer proyecto
+                    </button>
+                </div>
+
+                <!-- Project Form -->
+                <div class="project-form" id="projectForm">
+                    <div class="form-section">
+                        <h3 class="form-section-title">Información Básica</h3>
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label class="form-label" for="projectName">Nombre Comercial</label>
+                                <input type="text" class="form-input" id="projectName" placeholder="Ej: TaskFlow, HealthBuddy...">
+                                <span class="field-error" id="projectNameError"></span>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label" for="projectCategory">Industria / Categoría</label>
+                                <select class="form-select" id="projectCategory">
+                                    <option value="">Seleccionar...</option>
+                                    <option value="fintech">Fintech</option>
+                                    <option value="healthtech">HealthTech</option>
+                                    <option value="edtech">EdTech</option>
+                                    <option value="ecommerce">E-commerce</option>
+                                    <option value="social">Social / Comunidad</option>
+                                    <option value="productivity">Productividad</option>
+                                    <option value="entertainment">Entretenimiento</option>
+                                    <option value="travel">Viajes</option>
+                                    <option value="food">Food / Delivery</option>
+                                    <option value="other">Otro</option>
+                                </select>
+                            </div>
+                            <div class="form-group full-width">
+                                <label class="form-label" for="projectDescription">Descripción Corta del Proyecto</label>
+                                <textarea class="form-textarea" id="projectDescription" rows="3" placeholder="Describe brevemente qué quieres crear..."></textarea>
+                                <span class="field-error" id="projectDescriptionError"></span>
+                            </div>
+                            <div class="form-group full-width" id="expandedDescriptionGroup" style="display: none; margin-top: 20px; padding: 20px; background: var(--surface-color); border-radius: var(--radius-md); border: 2px solid var(--accent-primary);">
+                                <label class="form-label" for="expandedDescription" style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
+                                    <span style="font-size: 1.2rem;">✨</span>
+                                    <span style="font-size: 1rem; font-weight: 600;">Descripción Expandida y Refinada</span>
+                                </label>
+                                <p style="font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 12px; line-height: 1.5;">
+                                    Esta descripción refinada guiará todo el proceso de generación y asegurará que el resultado esté alineado con tu visión.
+                                </p>
+                                <textarea class="form-textarea" id="expandedDescription" rows="8" placeholder="La descripción expandida aparecerá aquí..." readonly style="width: 100%; background: var(--bg-primary); opacity: 1; border: 1px solid var(--border-color); resize: vertical; min-height: 150px;"></textarea>
+                                <div style="display: flex; gap: 10px; margin-top: 12px; flex-wrap: wrap;">
+                                    <button type="button" class="secondary-btn" onclick="regenerateExpandedDescription()" id="regenerateExpandedBtn" style="display: none;">
+                                        ↻ Regenerar
+                                    </button>
+                                    <button type="button" class="secondary-btn" onclick="editExpandedDescription()" id="editExpandedBtn" style="display: none;">
+                                        ✎ Editar
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        <button type="button" class="secondary-btn" onclick="expandDescription()" id="expandBtn" style="margin-top: 16px; width: 100%;">
+                            <span>📝</span> Expandir y Refinar Descripción
+                        </button>
+                    </div>
+
+                    <button class="generate-btn" onclick="generateProject()" id="generateBtn" disabled style="opacity: 0.5; cursor: not-allowed;">
+                        <span>⚡</span> Generar Flujo UX/UI Completo
+                    </button>
+                    <p style="text-align: center; color: var(--text-secondary); font-size: 0.9rem; margin-top: 8px;" id="generateHint">
+                        ↑ Primero expande la descripción para continuar
+                    </p>
+                </div>
+
+                <!-- Project View -->
+                <div class="project-view" id="projectView">
+                    <!-- Overview Section -->
+                    <div class="form-section" id="overviewSection">
+                        <h3 class="form-section-title">📋 Revisión de Concepto</h3>
+                        <div id="overviewContent"></div>
+                        <div style="margin-top: 16px; display: flex; gap: 10px;">
+                            <button class="header-btn primary" onclick="approveOverview()">✓ Aprobar y Continuar</button>
+                            <button class="header-btn" onclick="editOverview()">✎ Editar</button>
+                        </div>
+                    </div>
+
+                    <!-- Main Tabs -->
+                    <div class="tabs-container" id="mainTabs" style="display: none;">
+                        <div class="tabs-header">
+                            <button class="tab-btn active" data-tab="description">📝 Descripción</button>
+                            <button class="tab-btn" data-tab="flows">📱 Flujos de Pantalla</button>
+                            <button class="tab-btn" data-tab="tokens">🎨 Design Tokens</button>
+                            <button class="tab-btn" data-tab="elements">🧩 Elementos UI</button>
+                            <button class="tab-btn" data-tab="metrics">📊 Métricas</button>
+                            <button class="tab-btn" data-tab="generalRules">📜 Reglas Generales</button>
+                            <button class="tab-btn" data-tab="architecture">🏗️ Arquitectura</button>
+                            <button class="tab-btn" data-tab="consistency">✓ Consistencia</button>
+                            <button class="tab-btn" data-tab="development" disabled title="Completa el flujo de diseño primero">💻 Desarrollo</button>
+                        </div>
+
+                        <!-- Description Tab -->
+                        <div class="tab-content active" id="tab-description">
+                            <div class="content-block">
+                                <div class="content-block-header">
+                                    <span class="content-block-title">🎯 Qué es y qué hace</span>
+                                    <div class="content-block-actions">
+                                        <button class="block-action-btn" onclick="editBlock('whatIs')">✎ Editar</button>
+                                        <button class="block-action-btn copy-btn" onclick="copyBlock('whatIs')">⎘ Copiar</button>
+                                    </div>
+                                </div>
+                                <div class="content-block-body">
+                                    <textarea class="content-block-textarea" id="whatIs" readonly></textarea>
+                                </div>
+                            </div>
+
+                            <div class="content-block">
+                                <div class="content-block-header">
+                                    <span class="content-block-title">👥 Para quién es (Nicho)</span>
+                                    <div class="content-block-actions">
+                                        <button class="block-action-btn" onclick="editBlock('targetAudience')">✎ Editar</button>
+                                        <button class="block-action-btn copy-btn" onclick="copyBlock('targetAudience')">⎘ Copiar</button>
+                                    </div>
+                                </div>
+                                <div class="content-block-body">
+                                    <textarea class="content-block-textarea" id="targetAudience" readonly></textarea>
+                                </div>
+                            </div>
+
+                            <div class="content-block">
+                                <div class="content-block-header">
+                                    <span class="content-block-title">💡 Necesidades que resuelve</span>
+                                    <div class="content-block-actions">
+                                        <button class="block-action-btn" onclick="editBlock('needsSolved')">✎ Editar</button>
+                                        <button class="block-action-btn copy-btn" onclick="copyBlock('needsSolved')">⎘ Copiar</button>
+                                    </div>
+                                </div>
+                                <div class="content-block-body">
+                                    <textarea class="content-block-textarea" id="needsSolved" readonly></textarea>
+                                </div>
+                            </div>
+
+                            <div class="content-block">
+                                <div class="content-block-header">
+                                    <span class="content-block-title">🏆 Diferenciadores</span>
+                                    <div class="content-block-actions">
+                                        <button class="block-action-btn" onclick="editBlock('differentiators')">✎ Editar</button>
+                                        <button class="block-action-btn copy-btn" onclick="copyBlock('differentiators')">⎘ Copiar</button>
+                                    </div>
+                                </div>
+                                <div class="content-block-body">
+                                    <textarea class="content-block-textarea" id="differentiators" readonly></textarea>
+                                </div>
+                            </div>
+
+                            <div class="content-block">
+                                <div class="content-block-header">
+                                    <span class="content-block-title">🎤 Elevator Pitch</span>
+                                    <div class="content-block-actions">
+                                        <button class="block-action-btn" onclick="editBlock('elevatorPitch')">✎ Editar</button>
+                                        <button class="block-action-btn copy-btn" onclick="copyBlock('elevatorPitch')">⎘ Copiar</button>
+                                    </div>
+                                </div>
+                                <div class="content-block-body">
+                                    <textarea class="content-block-textarea" id="elevatorPitch" readonly></textarea>
+                                </div>
+                            </div>
+
+                            <div class="content-block">
+                                <div class="content-block-header">
+                                    <span class="content-block-title">📱 Tipo de Aplicación Recomendada</span>
+                                    <div class="content-block-actions">
+                                        <button class="block-action-btn" onclick="editBlock('appType')">✎ Editar</button>
+                                        <button class="block-action-btn copy-btn" onclick="copyBlock('appType')">⎘ Copiar</button>
+                                    </div>
+                                </div>
+                                <div class="content-block-body">
+                                    <textarea class="content-block-textarea" id="appType" readonly></textarea>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Flows Tab -->
+                        <div class="tab-content" id="tab-flows">
+                            <div class="flow-tier-selector">
+                                <button class="tier-btn active" data-tier="mvp">🚀 MVP</button>
+                                <button class="tier-btn" data-tier="intermediate">📈 Intermedio</button>
+                                <button class="tier-btn" data-tier="complete">✨ Completo</button>
+                            </div>
+
+                            <div id="flowsContainer">
+                                <!-- Flows will be rendered here -->
+                            </div>
+                        </div>
+
+                        <!-- Tokens Tab -->
+                        <div class="tab-content" id="tab-tokens">
+                            <div id="tokensContainer">
+                                <!-- Tokens will be rendered here -->
+                            </div>
+                        </div>
+
+                        <!-- Elements Tab -->
+                        <div class="tab-content" id="tab-elements">
+                            <div class="content-block">
+                                <div class="content-block-header">
+                                    <span class="content-block-title">🧩 Componentes UI Requeridos</span>
+                                    <div class="content-block-actions">
+                                        <button class="block-action-btn" onclick="editBlock('uiComponents')">✎ Editar</button>
+                                        <button class="block-action-btn copy-btn" onclick="copyBlock('uiComponents')">⎘ Copiar</button>
+                                    </div>
+                                </div>
+                                <div class="content-block-body">
+                                    <textarea class="content-block-textarea" id="uiComponents" readonly style="min-height: 300px;"></textarea>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Metrics Tab -->
+                        <div class="tab-content" id="tab-metrics">
+                            <div id="metricsContainer" class="metrics-grid">
+                                <!-- Metrics will be rendered here -->
+                            </div>
+                            <div class="content-block" style="margin-top: 24px;">
+                                <div class="content-block-header">
+                                    <span class="content-block-title">📊 Detalle de Métricas</span>
+                                    <div class="content-block-actions">
+                                        <button class="block-action-btn" onclick="editBlock('metricsDetail')">✎ Editar</button>
+                                        <button class="block-action-btn copy-btn" onclick="copyBlock('metricsDetail')">⎘ Copiar</button>
+                                    </div>
+                                </div>
+                                <div class="content-block-body">
+                                    <textarea class="content-block-textarea" id="metricsDetail" readonly style="min-height: 250px;"></textarea>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- General Rules Tab -->
+                        <div class="tab-content" id="tab-generalRules">
+                            <div id="generalRulesContainer">
+                                <!-- General Rules will be rendered here -->
+                            </div>
+                        </div>
+
+                        <!-- Architecture Tab -->
+                        <div class="tab-content" id="tab-architecture">
+                            <div id="architectureContainer">
+                                <!-- Architecture will be rendered here -->
+                            </div>
+                        </div>
+
+                        <!-- Consistency Tab -->
+                        <div class="tab-content" id="tab-consistency">
+                            <div id="consistencyContainer">
+                                <!-- Consistency will be rendered here -->
+                            </div>
+                        </div>
+
+                        <!-- Development Tab -->
+                        <div class="tab-content" id="tab-development">
+                            <div class="development-header">
+                                <h2>💻 Fase de Desarrollo Técnico</h2>
+                                <p>Sube las pantallas HTML generadas y obtén la estructura de desarrollo completa</p>
+                            </div>
+
+                            <div class="development-workflow">
+                                <!-- Step 1: Upload HTML Screens -->
+                                <div class="dev-step" id="devStep1">
+                                    <div class="dev-step-header">
+                                        <span class="dev-step-number">1</span>
+                                        <h3>Subir Pantallas HTML</h3>
+                                    </div>
+                                    <div class="dev-step-body">
+                                        <div class="upload-zone" id="htmlUploadZone">
+                                            <input type="file" id="htmlFilesInput" accept=".html" multiple style="display: none;">
+                                            <div class="upload-icon">📁</div>
+                                            <p class="upload-text">Arrastra archivos HTML aquí o haz clic para seleccionar</p>
+                                            <p class="upload-hint">Sube las pantallas HTML generadas (MVP, Media o Completa)</p>
+                                            <button class="btn-primary" onclick="document.getElementById('htmlFilesInput').click()">
+                                                Seleccionar Archivos HTML
+                                            </button>
+                                        </div>
+                                        <div class="uploaded-files-list" id="uploadedFilesList" style="display: none;">
+                                            <h4>Archivos subidos:</h4>
+                                            <div id="filesListContainer"></div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Step 2: Analysis Results -->
+                                <div class="dev-step" id="devStep2" style="display: none;">
+                                    <div class="dev-step-header">
+                                        <span class="dev-step-number">2</span>
+                                        <h3>Análisis de Pantallas</h3>
+                                    </div>
+                                    <div class="dev-step-body">
+                                        <div id="analysisResults">
+                                            <!-- Analysis results will be rendered here -->
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Step 3: Project Structure -->
+                                <div class="dev-step" id="devStep3" style="display: none;">
+                                    <div class="dev-step-header">
+                                        <span class="dev-step-number">3</span>
+                                        <h3>Estructura de Proyecto</h3>
+                                    </div>
+                                    <div class="dev-step-body">
+                                        <div id="projectStructure">
+                                            <!-- Project structure will be rendered here -->
+                                        </div>
+                                        <button class="btn-primary" onclick="app.downloadProjectZip()" style="margin-top: 20px;">
+                                            📦 Descargar Estructura (.zip)
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <!-- Step 4: Technical Prompt -->
+                                <div class="dev-step" id="devStep4" style="display: none;">
+                                    <div class="dev-step-header">
+                                        <span class="dev-step-number">4</span>
+                                        <h3>Prompt para Agente de IDE</h3>
+                                    </div>
+                                    <div class="dev-step-body">
+                                        <div class="technical-prompt-container">
+                                            <div class="prompt-header">
+                                                <h4>🚀 Instrucciones Técnicas de Desarrollo</h4>
+                                                <div class="prompt-actions">
+                                                    <button class="btn-secondary" onclick="app.copyTechnicalPrompt()">
+                                                        📋 Copiar Prompt
+                                                    </button>
+                                                    <button class="btn-secondary" onclick="app.downloadTechnicalPrompt()">
+                                                        💾 Descargar .txt
+                                                    </button>
+                                                </div>
+                                            </div>
+                                            <div class="prompt-content" id="technicalPromptContent">
+                                                <!-- Technical prompt will be rendered here -->
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Prompt Builder -->
+                    <div class="prompt-builder" id="promptBuilder" style="display: none;">
+                        <h3 class="prompt-builder-title">🔧 Constructor de Prompt para Agente de Diseño</h3>
+                        <p style="color: var(--text-muted); margin-bottom: 16px; font-size: 0.9rem;">Selecciona las secciones que deseas incluir en tu prompt personalizado:</p>
+                        
+                        <div class="prompt-sections" id="promptSections">
+                            <button class="prompt-section-toggle active" data-section="whatIs">Qué es</button>
+                            <button class="prompt-section-toggle active" data-section="targetAudience">Nicho</button>
+                            <button class="prompt-section-toggle active" data-section="needsSolved">Necesidades</button>
+                            <button class="prompt-section-toggle" data-section="differentiators">Diferenciadores</button>
+                            <button class="prompt-section-toggle" data-section="elevatorPitch">Elevator Pitch</button>
+                            <button class="prompt-section-toggle active" data-section="appType">Tipo App</button>
+                            <button class="prompt-section-toggle active" data-section="flowsMvp">Flujos MVP</button>
+                            <button class="prompt-section-toggle" data-section="flowsIntermediate">Flujos Intermediate</button>
+                            <button class="prompt-section-toggle" data-section="flowsComplete">Flujos Complete</button>
+                            <button class="prompt-section-toggle" data-section="generalRules">📜 Reglas Generales</button>
+                            <button class="prompt-section-toggle" data-section="architecture">🏗️ Arquitectura</button>
+                            <button class="prompt-section-toggle" data-section="consistency">✓ Consistencia</button>
+                            <button class="prompt-section-toggle active" data-section="tokens">Design Tokens</button>
+                            <button class="prompt-section-toggle" data-section="uiComponents">Componentes</button>
+                            <button class="prompt-section-toggle" data-section="metrics">Métricas</button>
+                        </div>
+
+                        <div class="prompt-output" id="promptOutput">
+                            <!-- Generated prompt will appear here -->
+                        </div>
+
+                        <div class="prompt-actions">
+                            <button class="header-btn primary" onclick="copyPrompt()">⎘ Copiar Prompt</button>
+                            <button class="header-btn" onclick="regeneratePrompt()">↻ Regenerar</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Loading Overlay -->
+    <div class="loading-overlay" id="loadingOverlay">
+        <div class="spinner"></div>
+        <div class="loading-text" id="loadingText">Generando flujo UX/UI...</div>
+        <div class="loading-progress" id="loadingProgress" style="display: none;">
+            <div class="progress-bar">
+                <div class="progress-fill" id="progressFill" style="width: 0%;"></div>
+            </div>
+            <div class="progress-text" id="progressText">0%</div>
+        </div>
+    </div>
+
+    <!-- Delete Modal -->
+    <div class="modal-overlay" id="deleteModal" role="dialog" aria-labelledby="deleteModalTitle" aria-modal="true">
+        <div class="modal">
+            <h3 class="modal-title" id="deleteModalTitle">¿Eliminar proyecto?</h3>
+            <p class="modal-text">Esta acción no se puede deshacer. El proyecto será eliminado permanentemente.</p>
+            <div class="modal-actions">
+                <button class="modal-btn cancel" onclick="closeDeleteModal()">Cancelar</button>
+                <button class="modal-btn confirm" onclick="confirmDelete()">Eliminar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Versions Modal -->
+    <div class="modal-overlay" id="versionsModal" role="dialog" aria-labelledby="versionsModalTitle" aria-modal="true">
+        <div class="modal">
+            <h3 class="modal-title" id="versionsModalTitle">Gestión de Versiones</h3>
+            <div style="margin-bottom: 16px;">
+                <label for="versionNameInput" style="display: block; font-size: 0.85rem; margin-bottom: 8px; color: var(--text-secondary);">Nombre de la versión</label>
+                <input type="text" id="versionNameInput" class="form-input" placeholder="ej: MVP Final, Versión para cliente, etc." style="margin-bottom: 8px;">
+                <button class="header-btn primary" onclick="createVersion()" style="width: 100%;">💾 Crear Nueva Versión</button>
+            </div>
+            <div class="version-list" id="versionsList"></div>
+            <div class="modal-actions" style="margin-top: 16px;">
+                <button class="modal-btn cancel" onclick="closeVersionsModal()">Cerrar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Share Modal -->
+    <div class="modal-overlay" id="shareModal" role="dialog" aria-labelledby="shareModalTitle" aria-modal="true">
+        <div class="modal">
+            <h3 class="modal-title" id="shareModalTitle">Compartir Proyecto</h3>
+            <p class="modal-text">Comparte este enlace para que otros puedan importar tu proyecto:</p>
+            <div class="share-link-container">
+                <input type="text" class="share-link-input" id="shareLinkInput" readonly aria-label="Enlace para compartir">
+                <button class="header-btn primary" onclick="copyShareLink()">📋 Copiar</button>
+            </div>
+            <div id="qrCodeContainer" style="display: none;"></div>
+            <div class="modal-actions">
+                <button class="modal-btn" onclick="generateQRCode()" id="qrBtn">📱 Generar QR</button>
+                <button class="modal-btn cancel" onclick="closeShareModal()">Cerrar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div class="toast-container" id="toastContainer" role="status" aria-live="polite" aria-atomic="true"></div>
+
+    <script src="app.js" defer></script>
+</body>
+</html>
