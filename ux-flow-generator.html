@@ -67,12 +67,6 @@
 
             <div class="search-container">
                 <input type="text" class="search-input" id="projectSearch" placeholder="🔍 Buscar proyectos...">
-                <div class="filter-controls">
-                    <button class="filter-btn active" data-category="all" onclick="filterProjects('all')">Todos</button>
-                    <button class="filter-btn" data-category="fintech" onclick="filterProjects('fintech')">Fintech</button>
-                    <button class="filter-btn" data-category="healthtech" onclick="filterProjects('healthtech')">Health</button>
-                    <button class="filter-btn" data-category="edtech" onclick="filterProjects('edtech')">EdTech</button>
-                </div>
             </div>
 
             <div class="projects-list">
@@ -169,7 +163,7 @@
                                 <p style="font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 12px; line-height: 1.5;">
                                     Esta descripción refinada guiará todo el proceso de generación y asegurará que el resultado esté alineado con tu visión.
                                 </p>
-                                <textarea class="form-textarea" id="expandedDescription" rows="8" placeholder="La descripción expandida aparecerá aquí..." readonly style="width: 100%; background: var(--bg-primary); opacity: 1; border: 1px solid var(--border-color); resize: vertical; min-height: 150px;"></textarea>
+                                <textarea class="form-textarea" id="expandedDescription" rows="8" placeholder="La descripción expandida aparecerá aquí..." readonly style="width: 100%; background: var(--bg-primary); opacity: 1; border: 1px solid var(--border-color); resize: none; overflow: hidden; min-height: 150px;"></textarea>
                                 <div style="display: flex; gap: 10px; margin-top: 12px; flex-wrap: wrap;">
                                     <button type="button" class="secondary-btn" onclick="regenerateExpandedDescription()" id="regenerateExpandedBtn" style="display: none;">
                                         ↻ Regenerar

@@ -441,7 +441,9 @@ body {
 
 .form-textarea {
     min-height: 120px;
-    resize: vertical;
+    resize: none;
+    overflow: hidden;
+    height: auto;
 }
 
 .form-select {
@@ -498,31 +500,15 @@ body {
 
 .tabs-header {
     display: flex;
+    flex-wrap: wrap;
     border-bottom: 1px solid var(--border-color);
     background: var(--bg-secondary);
-    overflow-x: auto;
-    overflow-y: hidden;
-    scrollbar-width: thin;
-    scrollbar-color: var(--accent-primary) var(--bg-tertiary);
-    -webkit-overflow-scrolling: touch;
-    padding-right: 8px;
-}
-
-.tabs-header::-webkit-scrollbar {
-    height: 4px;
-}
-
-.tabs-header::-webkit-scrollbar-track {
-    background: var(--bg-tertiary);
-}
-
-.tabs-header::-webkit-scrollbar-thumb {
-    background: var(--accent-primary);
-    border-radius: 2px;
+    padding: 8px 8px 0 8px;
+    gap: 4px;
 }
 
 .tab-btn {
-    padding: 12px 14px;
+    padding: 10px 14px;
     background: transparent;
     border: none;
     color: var(--text-muted);
@@ -533,7 +519,8 @@ body {
     transition: var(--transition);
     white-space: nowrap;
     position: relative;
-    flex-shrink: 0;
+    border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+    margin-bottom: -1px;
 }
 
 .tab-btn:last-child {
@@ -548,6 +535,8 @@ body {
 .tab-btn.active {
     color: var(--text-primary);
     background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-bottom-color: var(--bg-card);
 }
 
 .tab-btn.active::after {
@@ -647,7 +636,9 @@ body {
     font-family: 'JetBrains Mono', monospace;
     font-size: 0.85rem;
     line-height: 1.7;
-    resize: vertical;
+    resize: none;
+    overflow: hidden;
+    height: auto;
     transition: var(--transition);
 }
 
@@ -849,8 +840,6 @@ body {
     font-family: 'JetBrains Mono', monospace;
     font-size: 0.85rem;
     line-height: 1.7;
-    max-height: 400px;
-    overflow-y: auto;
     white-space: pre-wrap;
 }
 
@@ -2551,8 +2540,6 @@ button:focus-visible, .btn-primary:focus-visible, .btn-secondary:focus-visible {
     font-size: 0.85rem;
     line-height: 1.6;
     color: var(--text-secondary);
-    max-height: 400px;
-    overflow-y: auto;
     white-space: pre-wrap;
     word-break: break-word;
 }
@@ -2620,4 +2607,95 @@ button:focus-visible, .btn-primary:focus-visible, .btn-secondary:focus-visible {
         flex-direction: column;
         align-items: flex-start;
     }
+}
+
+/* Project Item Enhancements */
+.project-item-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
+}
+
+.project-item-delete {
+    width: 24px;
+    height: 24px;
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    border-radius: var(--radius-sm);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    transition: var(--transition);
+    font-size: 0.9rem;
+}
+
+.project-item:hover .project-item-delete {
+    opacity: 1;
+}
+
+.project-item-delete:hover {
+    background: var(--error);
+    color: white;
+}
+
+.project-item-meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 6px;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
+.project-item-category {
+    text-transform: capitalize;
+    background: var(--bg-tertiary);
+    padding: 2px 8px;
+    border-radius: var(--radius-sm);
+}
+
+/* Version List Styles */
+.version-item {
+    transition: var(--transition);
+}
+
+.version-item:hover {
+    background: var(--bg-hover);
+}
+
+.danger-btn {
+    background: var(--error) !important;
+    color: white !important;
+}
+
+.danger-btn:hover {
+    opacity: 0.9;
+}
+
+/* Share Modal */
+.share-link-container {
+    display: flex;
+    gap: 10px;
+    margin: 16px 0;
+}
+
+.share-link-input {
+    flex: 1;
+    padding: 12px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    font-size: 0.85rem;
+}
+
+/* QR Code Container */
+#qrCodeContainer {
+    margin-top: 20px;
+    border-top: 1px solid var(--border-color);
+    padding-top: 20px;
 }

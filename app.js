@@ -99,6 +99,953 @@ class SecureStorage {
 }
 
 // ====================
+// PROJECT SEARCH CLASS
+// ====================
+class ProjectSearch {
+    static search(projects, query) {
+        if (!query || query.trim() === '') return projects;
+        
+        const lowerQuery = query.toLowerCase().trim();
+        return projects.filter(p => 
+            p.name.toLowerCase().includes(lowerQuery) ||
+            (p.description && p.description.toLowerCase().includes(lowerQuery)) ||
+            (p.category && p.category.toLowerCase().includes(lowerQuery))
+        );
+    }
+    
+    static filter(projects, filters) {
+        let filtered = [...projects];
+        
+        if (filters.category && filters.category !== 'all') {
+            filtered = filtered.filter(p => p.category === filters.category);
+        }
+        
+        if (filters.dateFrom) {
+            filtered = filtered.filter(p => new Date(p.createdAt) >= filters.dateFrom);
+        }
+        
+        if (filters.dateTo) {
+            filtered = filtered.filter(p => new Date(p.createdAt) <= filters.dateTo);
+        }
+        
+        return filtered;
+    }
+}
+
+// ====================
+// HISTORY MANAGER CLASS (Undo/Redo)
+// ====================
+class HistoryManager {
+    constructor(maxHistory = 20) {
+        this.history = [];
+        this.currentIndex = -1;
+        this.maxHistory = maxHistory;
+    }
+    
+    push(state) {
+        // Remover estados futuros si estamos en medio del historial
+        this.history = this.history.slice(0, this.currentIndex + 1);
+        
+        // Hacer deep copy del estado
+        this.history.push(JSON.parse(JSON.stringify(state)));
+        
+        if (this.history.length > this.maxHistory) {
+            this.history.shift();
+        } else {
+            this.currentIndex++;
+        }
+        
+        this.updateButtons();
+    }
+    
+    undo() {
+        if (this.canUndo()) {
+            this.currentIndex--;
+            this.updateButtons();
+            return JSON.parse(JSON.stringify(this.history[this.currentIndex]));
+        }
+        return null;
+    }
+    
+    redo() {
+        if (this.canRedo()) {
+            this.currentIndex++;
+            this.updateButtons();
+            return JSON.parse(JSON.stringify(this.history[this.currentIndex]));
+        }
+        return null;
+    }
+    
+    canUndo() {
+        return this.currentIndex > 0;
+    }
+    
+    canRedo() {
+        return this.currentIndex < this.history.length - 1;
+    }
+    
+    updateButtons() {
+        const undoBtn = document.getElementById('undoBtn');
+        const redoBtn = document.getElementById('redoBtn');
+        
+        if (undoBtn) undoBtn.disabled = !this.canUndo();
+        if (redoBtn) redoBtn.disabled = !this.canRedo();
+    }
+    
+    clear() {
+        this.history = [];
+        this.currentIndex = -1;
+        this.updateButtons();
+    }
+}
+
+// ====================
+// PROJECT TEMPLATES CLASS
+// ====================
+class ProjectTemplates {
+    static getTemplates() {
+        return [
+            {
+                id: 'saas_dashboard',
+                name: 'SaaS Dashboard',
+                category: 'productivity',
+                description: 'Panel de control completo para aplicaciones SaaS con analytics, gestión de usuarios y configuraciones avanzadas'
+            },
+            {
+                id: 'ecommerce_mobile',
+                name: 'E-commerce App',
+                category: 'ecommerce',
+                description: 'Aplicación móvil de comercio electrónico con catálogo, carrito de compras, pagos integrados y seguimiento de pedidos'
+            },
+            {
+                id: 'fitness_tracker',
+                name: 'Fitness Tracker',
+                category: 'healthtech',
+                description: 'App de seguimiento de actividad física con monitoreo de ejercicios, nutrición, metas personales y progreso'
+            },
+            {
+                id: 'learning_platform',
+                name: 'Plataforma Educativa',
+                category: 'edtech',
+                description: 'Sistema de gestión de aprendizaje con cursos interactivos, evaluaciones, certificados y progreso del estudiante'
+            },
+            {
+                id: 'fintech_wallet',
+                name: 'Wallet Digital',
+                category: 'fintech',
+                description: 'Billetera digital para gestión de finanzas personales, pagos, transferencias y visualización de gastos'
+            },
+            {
+                id: 'social_network',
+                name: 'Red Social',
+                category: 'social',
+                description: 'Plataforma social para compartir contenido, seguir usuarios, mensajería y feed personalizado'
+            }
+        ];
+    }
+    
+    static applyTemplate(templateId) {
+        const template = this.getTemplates().find(t => t.id === templateId);
+        if (template) {
+            document.getElementById('projectName').value = template.name;
+            document.getElementById('projectCategory').value = template.category;
+            document.getElementById('projectDescription').value = template.description;
+            
+            // Limpiar errores si existen
+            ProjectValidator.clearAllErrors();
+            
+            showToast(`Template "${template.name}" aplicado`, 'success');
+        }
+    }
+}
+
+// ====================
+// PROJECT VERSIONING CLASS
+// ====================
+class ProjectVersioning {
+    static createVersion(projectId, versionName) {
+        const project = state.projects.find(p => p.id === projectId);
+        if (!project) return null;
+        
+        const versions = this.getVersions(projectId);
+        const version = {
+            id: generateId(),
+            projectId,
+            name: versionName || `Versión ${versions.length + 1}`,
+            data: JSON.parse(JSON.stringify(project.data)),
+            createdAt: new Date().toISOString(),
+            projectName: project.name
+        };
+        
+        // Guardar versión en localStorage
+        const allVersions = JSON.parse(localStorage.getItem('flowforge_versions') || '[]');
+        allVersions.push(version);
+        
+        // Limitar a 50 versiones totales
+        if (allVersions.length > 50) {
+            allVersions.shift();
+        }
+        
+        localStorage.setItem('flowforge_versions', JSON.stringify(allVersions));
+        return version;
+    }
+    
+    static getVersions(projectId) {
+        const allVersions = JSON.parse(localStorage.getItem('flowforge_versions') || '[]');
+        return allVersions.filter(v => v.projectId === projectId)
+            .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    }
+    
+    static restoreVersion(versionId) {
+        const allVersions = JSON.parse(localStorage.getItem('flowforge_versions') || '[]');
+        const version = allVersions.find(v => v.id === versionId);
+        
+        if (version) {
+            const project = state.projects.find(p => p.id === version.projectId);
+            if (project) {
+                project.data = JSON.parse(JSON.stringify(version.data));
+                project.updatedAt = new Date().toISOString();
+                saveProjects();
+                return true;
+            }
+        }
+        return false;
+    }
+    
+    static deleteVersion(versionId) {
+        const allVersions = JSON.parse(localStorage.getItem('flowforge_versions') || '[]');
+        const filtered = allVersions.filter(v => v.id !== versionId);
+        localStorage.setItem('flowforge_versions', JSON.stringify(filtered));
+    }
+}
+
+// ====================
+// PROJECT SHARING CLASS
+// ====================
+class ProjectSharing {
+    static generateShareLink(projectId) {
+        const project = state.projects.find(p => p.id === projectId);
+        if (!project) return null;
+        
+        // Crear objeto compartible (sin IDs internos)
+        const shareData = {
+            name: project.name,
+            category: project.category,
+            description: project.description,
+            data: project.data,
+            sharedAt: new Date().toISOString()
+        };
+        
+        try {
+            const encoded = btoa(encodeURIComponent(JSON.stringify(shareData)));
+            return `${window.location.origin}${window.location.pathname}?import=${encoded}`;
+        } catch (e) {
+            console.error('Error generating share link:', e);
+            return null;
+        }
+    }
+    
+    static importFromLink() {
+        const params = new URLSearchParams(window.location.search);
+        const importData = params.get('import');
+        
+        if (importData) {
+            try {
+                const decoded = JSON.parse(decodeURIComponent(atob(importData)));
+                
+                // Generar ID único para proyecto importado
+                let projectId = generateId();
+                while (state.projects.some(p => p.id === projectId)) {
+                    projectId = generateId();
+                }
+                
+                // Crear nuevo proyecto con datos importados
+                const project = {
+                    id: projectId,
+                    name: decoded.name + ' (Importado)',
+                    category: decoded.category,
+                    description: decoded.description,
+                    data: decoded.data,
+                    overviewApproved: true,
+                    createdAt: new Date().toISOString(),
+                    updatedAt: new Date().toISOString()
+                };
+                
+                state.projects.push(project);
+                saveProjects();
+                renderProjectsList();
+                
+                showToast(`Proyecto "${decoded.name}" importado exitosamente`, 'success');
+                
+                // Abrir proyecto importado
+                openProject(project.id);
+                
+                // Limpiar URL
+                window.history.replaceState({}, document.title, window.location.pathname);
+                
+                return true;
+            } catch (e) {
+                console.error('Error importing project:', e);
+                showToast('Error al importar proyecto. Enlace inválido.', 'error');
+                return false;
+            }
+        }
+        return false;
+    }
+}
+
+// ====================
+// ACCESSIBILITY ENHANCEMENTS CLASS
+// ====================
+class A11yEnhancements {
+    static init() {
+        this.addARIALabels();
+        this.setupKeyboardNav();
+        this.setupFocusManagement();
+    }
+    
+    static addARIALabels() {
+        // Agregar labels descriptivos a elementos sin texto
+        document.querySelectorAll('button:not([aria-label])').forEach(btn => {
+            if (btn.textContent.trim()) {
+                btn.setAttribute('aria-label', btn.textContent.trim());
+            }
+        });
+        
+        // Marcar regiones importantes
+        const projectsList = document.getElementById('projectsList');
+        if (projectsList) {
+            projectsList.setAttribute('role', 'list');
+            projectsList.setAttribute('aria-label', 'Lista de proyectos');
+        }
+    }
+    
+    static setupKeyboardNav() {
+        // Tab navigation en modales
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Tab') {
+                const activeModal = document.querySelector('.modal-overlay.active');
+                if (activeModal) {
+                    const focusableElements = activeModal.querySelectorAll(
+                        'button, input, textarea, select, a[href]'
+                    );
+                    const firstElement = focusableElements[0];
+                    const lastElement = focusableElements[focusableElements.length - 1];
+                    
+                    if (e.shiftKey && document.activeElement === firstElement) {
+                        e.preventDefault();
+                        lastElement.focus();
+                    } else if (!e.shiftKey && document.activeElement === lastElement) {
+                        e.preventDefault();
+                        firstElement.focus();
+                    }
+                }
+            }
+        });
+    }
+    
+    static setupFocusManagement() {
+        // Guardar y restaurar foco cuando se abren/cierran modales
+        let lastFocusedElement = null;
+        
+        document.querySelectorAll('.modal-overlay').forEach(modal => {
+            const observer = new MutationObserver((mutations) => {
+                mutations.forEach((mutation) => {
+                    if (mutation.attributeName === 'class') {
+                        if (modal.classList.contains('active')) {
+                            lastFocusedElement = document.activeElement;
+                            // Enfocar primer elemento del modal
+                            setTimeout(() => {
+                                const firstInput = modal.querySelector('input, button');
+                                if (firstInput) firstInput.focus();
+                            }, 100);
+                        } else if (lastFocusedElement) {
+                            lastFocusedElement.focus();
+                            lastFocusedElement = null;
+                        }
+                    }
+                });
+            });
+            
+            observer.observe(modal, { attributes: true });
+        });
+    }
+    
+    static announceToScreenReader(message) {
+        const announcement = document.createElement('div');
+        announcement.setAttribute('role', 'status');
+        announcement.setAttribute('aria-live', 'polite');
+        announcement.className = 'sr-only';
+        announcement.textContent = message;
+        
+        document.body.appendChild(announcement);
+        
+        setTimeout(() => announcement.remove(), 1000);
+    }
+}
+
+// ====================
+// ALIGNMENT ANALYZER CLASS
+// ====================
+class AlignmentAnalyzer {
+    static analyze(userInput, generatedOutput) {
+        // Usar descripción expandida si existe, sino la descripción original
+        const referenceDescription = userInput.expandedDescription || userInput.description;
+        
+        const inputKeywords = this.extractKeywords(referenceDescription);
+        const outputKeywords = this.extractKeywords(generatedOutput.whatIs);
+        
+        const analysis = {
+            score: 0,
+            inputKeywords,
+            outputKeywords,
+            matched: [],
+            missing: [],
+            extra: [],
+            keywordCoverage: 0,
+            semanticAlignment: 0,
+            categoryAlignment: 0,
+            recommendations: []
+        };
+        
+        // Comparar keywords
+        inputKeywords.forEach(keyword => {
+            const found = outputKeywords.some(out => 
+                out.toLowerCase().includes(keyword.toLowerCase()) ||
+                keyword.toLowerCase().includes(out.toLowerCase())
+            );
+            
+            if (found) {
+                analysis.matched.push(keyword);
+            } else {
+                analysis.missing.push(keyword);
+            }
+        });
+        
+        // Identificar keywords extra en output
+        outputKeywords.forEach(keyword => {
+            const found = inputKeywords.some(inp => 
+                inp.toLowerCase().includes(keyword.toLowerCase()) ||
+                keyword.toLowerCase().includes(inp.toLowerCase())
+            );
+            
+            if (!found && !analysis.matched.includes(keyword)) {
+                analysis.extra.push(keyword);
+            }
+        });
+        
+        // Calcular keyword coverage
+        analysis.keywordCoverage = inputKeywords.length > 0 
+            ? (analysis.matched.length / inputKeywords.length) * 100 
+            : 100;
+        
+        // Verificar alineación de categoría
+        analysis.categoryAlignment = this.analyzeCategoryAlignment(
+            userInput.category, 
+            generatedOutput
+        );
+        
+        // Analizar alineación semántica (longitud y complejidad)
+        analysis.semanticAlignment = this.analyzeSemanticAlignment(
+            userInput.description,
+            generatedOutput.whatIs
+        );
+        
+        // Calcular score final
+        analysis.score = Math.round(
+            (analysis.keywordCoverage * 0.5) +
+            (analysis.categoryAlignment * 0.25) +
+            (analysis.semanticAlignment * 0.25)
+        );
+        
+        // Generar recomendaciones
+        analysis.recommendations = this.generateRecommendations(analysis, userInput);
+        
+        return analysis;
+    }
+    
+    static extractKeywords(text) {
+        if (!text) return [];
+        
+        // Stopwords en español
+        const stopwords = new Set([
+            'el', 'la', 'de', 'que', 'y', 'a', 'en', 'un', 'ser', 'se', 'no', 'haber',
+            'por', 'con', 'su', 'para', 'como', 'estar', 'tener', 'le', 'lo', 'todo',
+            'pero', 'mas', 'más', 'hacer', 'o', 'poder', 'decir', 'este', 'ir', 'otro',
+            'ese', 'si', 'sí', 'me', 'ya', 'ver', 'porque', 'dar', 'cuando', 'muy',
+            'sin', 'vez', 'mucho', 'saber', 'qué', 'sobre', 'mi', 'alguno', 'mismo',
+            'yo', 'también', 'hasta', 'año', 'dos', 'querer', 'entre', 'así', 'primero',
+            'desde', 'grande', 'eso', 'ni', 'nos', 'llegar', 'pasar', 'tiempo', 'ella',
+            'una', 'las', 'los', 'del', 'al', 'es', 'son', 'esta', 'estas', 'estos',
+            'esos', 'fue', 'sus', 'les', 'nos', 'una', 'sus'
+        ]);
+        
+        // Extraer palabras significativas
+        const words = text.toLowerCase()
+            .replace(/[^\w\sáéíóúüñ]/g, ' ')
+            .split(/\s+/)
+            .filter(word => word.length > 3 && !stopwords.has(word));
+        
+        // Contar frecuencia
+        const frequency = {};
+        words.forEach(word => {
+            frequency[word] = (frequency[word] || 0) + 1;
+        });
+        
+        // Retornar palabras más frecuentes (máximo 15)
+        return Object.entries(frequency)
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 15)
+            .map(([word]) => word);
+    }
+    
+    static analyzeCategoryAlignment(category, output) {
+        if (!category || category === '') return 100;
+        
+        const categoryKeywords = {
+            fintech: ['financ', 'dinero', 'pago', 'transacción', 'banco', 'inversión', 'ahorro'],
+            healthtech: ['salud', 'bienestar', 'médic', 'ejercicio', 'fitness', 'nutrición'],
+            edtech: ['educación', 'aprendizaje', 'curso', 'estudiante', 'enseñanza', 'conocimiento'],
+            ecommerce: ['compra', 'venta', 'producto', 'tienda', 'carrito', 'pedido', 'comercio'],
+            social: ['social', 'comunidad', 'red', 'compartir', 'seguir', 'amigo', 'conexión'],
+            productivity: ['productividad', 'tarea', 'proyecto', 'gestión', 'organización', 'eficiencia'],
+            entertainment: ['entretenimiento', 'contenido', 'video', 'película', 'serie', 'diversión'],
+            travel: ['viaje', 'destino', 'hotel', 'vuelo', 'reserva', 'turismo', 'aventura'],
+            food: ['comida', 'restaurante', 'delivery', 'receta', 'menú', 'gastronomía']
+        };
+        
+        const keywords = categoryKeywords[category] || [];
+        const outputText = (output.whatIs + ' ' + output.targetAudience).toLowerCase();
+        
+        const matches = keywords.filter(keyword => 
+            outputText.includes(keyword)
+        );
+        
+        return keywords.length > 0 
+            ? (matches.length / keywords.length) * 100 
+            : 100;
+    }
+    
+    static analyzeSemanticAlignment(input, output) {
+        // Verificar que el output no sea demasiado genérico
+        const inputLength = input.split(' ').length;
+        const outputLength = output.split(' ').length;
+        
+        // El output debe ser más largo pero no excesivamente
+        const expansionRatio = outputLength / inputLength;
+        
+        // Ideal: 3-8x la longitud del input
+        if (expansionRatio < 2) return 50; // Muy corto
+        if (expansionRatio > 15) return 60; // Demasiado largo, posible desviación
+        if (expansionRatio >= 3 && expansionRatio <= 8) return 100; // Óptimo
+        if (expansionRatio >= 2 && expansionRatio < 3) return 80; // Aceptable pero corto
+        if (expansionRatio > 8 && expansionRatio <= 15) return 75; // Aceptable pero largo
+        
+        return 70;
+    }
+    
+    static generateRecommendations(analysis, userInput) {
+        const recommendations = [];
+        
+        if (analysis.score < 60) {
+            recommendations.push({
+                type: 'critical',
+                message: 'El resultado generado se ha desviado significativamente de tu descripción original.',
+                action: 'regenerate'
+            });
+        }
+        
+        if (analysis.missing.length > 3) {
+            recommendations.push({
+                type: 'warning',
+                message: `Faltan ${analysis.missing.length} conceptos clave de tu descripción: ${analysis.missing.slice(0, 3).join(', ')}...`,
+                action: 'refine'
+            });
+        }
+        
+        if (analysis.extra.length > 5) {
+            recommendations.push({
+                type: 'info',
+                message: 'Se agregaron conceptos que no mencionaste. Revisa si se alinean con tu visión.',
+                action: 'review'
+            });
+        }
+        
+        if (analysis.categoryAlignment < 50) {
+            recommendations.push({
+                type: 'warning',
+                message: `El contenido generado no parece alineado con la categoría "${userInput.category}".`,
+                action: 'adjust_category'
+            });
+        }
+        
+        if (recommendations.length === 0) {
+            recommendations.push({
+                type: 'success',
+                message: 'Excelente alineación entre tu descripción y el resultado generado.',
+                action: 'approve'
+            });
+        }
+        
+        return recommendations;
+    }
+    
+    static getScoreLevel(score) {
+        if (score >= 80) return { level: 'excellent', label: 'Excelente', icon: '✓' };
+        if (score >= 65) return { level: 'good', label: 'Buena', icon: '✓' };
+        if (score >= 50) return { level: 'fair', label: 'Aceptable', icon: '⚠' };
+        return { level: 'poor', label: 'Baja', icon: '✕' };
+    }
+}
+
+// ====================
+// OPTIMIZED RENDERER CLASS
+// ====================
+class OptimizedRenderer {
+    static #renderedProjects = new Map();
+    
+    static renderProjectsList(projects, containerId) {
+        const container = document.getElementById(containerId);
+        if (!container) return;
+        
+        const sorted = projects.sort((a, b) => 
+            new Date(b.updatedAt) - new Date(a.updatedAt)
+        );
+        
+        // Crear un fragment para optimizar el DOM
+        const fragment = document.createDocumentFragment();
+        const existingIds = new Set();
+        
+        sorted.forEach(project => {
+            existingIds.add(project.id);
+            const cached = this.#renderedProjects.get(project.id);
+            
+            // Solo re-renderizar si cambió
+            if (!cached || cached.updatedAt !== project.updatedAt || 
+                cached.name !== project.name || cached.isActive !== (state.currentProjectId === project.id)) {
+                
+                const element = this.#createProjectElement(project);
+                
+                if (cached && cached.element.parentNode) {
+                    cached.element.replaceWith(element);
+                } else {
+                    fragment.appendChild(element);
+                }
+                
+                this.#renderedProjects.set(project.id, {
+                    element,
+                    updatedAt: project.updatedAt,
+                    name: project.name,
+                    isActive: state.currentProjectId === project.id
+                });
+            } else if (cached.element.parentNode !== container) {
+                fragment.appendChild(cached.element);
+            }
+        });
+        
+        // Remover elementos que ya no existen
+        this.#renderedProjects.forEach((value, key) => {
+            if (!existingIds.has(key)) {
+                value.element.remove();
+                this.#renderedProjects.delete(key);
+            }
+        });
+        
+        if (fragment.children.length > 0) {
+            container.innerHTML = '';
+            container.appendChild(fragment);
+        }
+    }
+    
+    static #createProjectElement(project) {
+        const div = document.createElement('div');
+        div.className = `project-item ${state.currentProjectId === project.id ? 'active' : ''}`;
+        div.dataset.id = project.id;
+        div.onclick = () => openProject(project.id);
+        
+        const info = document.createElement('div');
+        info.className = 'project-item-info';
+        
+        const name = document.createElement('div');
+        name.className = 'project-item-name';
+        name.textContent = project.name;
+        
+        const date = document.createElement('div');
+        date.className = 'project-item-date';
+        date.textContent = formatDate(project.updatedAt);
+        
+        info.appendChild(name);
+        info.appendChild(date);
+        
+        const actions = document.createElement('div');
+        actions.className = 'project-item-actions';
+        
+        const deleteBtn = document.createElement('button');
+        deleteBtn.className = 'project-action-btn';
+        deleteBtn.textContent = '✕';
+        deleteBtn.onclick = (e) => {
+            e.stopPropagation();
+            deleteProject(project.id);
+        };
+        
+        actions.appendChild(deleteBtn);
+        
+        div.appendChild(info);
+        div.appendChild(actions);
+        
+        return div;
+    }
+    
+    static clear() {
+        this.#renderedProjects.clear();
+    }
+}
+
+// ====================
+// PROJECT VALIDATOR CLASS
+// ====================
+class ProjectValidator {
+    static validate(data) {
+        const errors = [];
+        
+        // Validación de nombre
+        if (!data.name || data.name.trim().length < 3) {
+            errors.push({ field: 'projectName', message: 'El nombre debe tener al menos 3 caracteres' });
+        } else if (data.name.length > 50) {
+            errors.push({ field: 'projectName', message: 'El nombre no puede exceder 50 caracteres' });
+        }
+        
+        // Validación de descripción
+        if (!data.description || data.description.trim().length < 20) {
+            errors.push({ field: 'projectDescription', message: 'La descripción debe tener al menos 20 caracteres' });
+        } else if (data.description.length > 500) {
+            errors.push({ field: 'projectDescription', message: 'La descripción no puede exceder 500 caracteres' });
+        }
+        
+        return { valid: errors.length === 0, errors };
+    }
+    
+    static clearFieldError(fieldId) {
+        const field = document.getElementById(fieldId);
+        const error = document.getElementById(fieldId + 'Error');
+        if (field) field.classList.remove('error');
+        if (error) {
+            error.classList.remove('active');
+            error.textContent = '';
+        }
+    }
+    
+    static showFieldError(fieldId, message) {
+        const field = document.getElementById(fieldId);
+        const error = document.getElementById(fieldId + 'Error');
+        if (field) field.classList.add('error');
+        if (error) {
+            error.classList.add('active');
+            error.textContent = message;
+        }
+    }
+    
+    static clearAllErrors() {
+        ['projectName', 'projectDescription'].forEach(fieldId => {
+            this.clearFieldError(fieldId);
+        });
+    }
+}
+
+// ====================
+// DOM SANITIZER CLASS
+// ====================
+class DOMSanitizer {
+    static sanitize(text) {
+        const temp = document.createElement('div');
+        temp.textContent = text;
+        return temp.innerHTML;
+    }
+    
+    static sanitizeHTML(html) {
+        const temp = document.createElement('div');
+        temp.innerHTML = html;
+        
+        // Remover scripts y event handlers
+        temp.querySelectorAll('script').forEach(el => el.remove());
+        temp.querySelectorAll('*').forEach(el => {
+            Array.from(el.attributes).forEach(attr => {
+                if (attr.name.startsWith('on')) {
+                    el.removeAttribute(attr.name);
+                }
+            });
+        });
+        
+        return temp.innerHTML;
+    }
+}
+
+// ====================
+// API ERROR HANDLER CLASS
+// ====================
+class APIErrorHandler {
+    static handle(error, response) {
+        if (!response) {
+            return {
+                type: 'NETWORK_ERROR',
+                message: 'Error de conexión. Verifica tu internet.',
+                userMessage: 'No se pudo conectar con el servidor. Verifica tu conexión a internet.',
+                fallback: true
+            };
+        }
+        
+        switch (response.status) {
+            case 401:
+                return {
+                    type: 'AUTH_ERROR',
+                    message: 'API Key inválida',
+                    userMessage: 'La API Key proporcionada no es válida. Por favor verifica tu clave.',
+                    action: 'FOCUS_API_KEY'
+                };
+            
+            case 429:
+                return {
+                    type: 'RATE_LIMIT',
+                    message: 'Límite de solicitudes alcanzado',
+                    userMessage: 'Has alcanzado el límite de solicitudes. Intenta nuevamente en unos minutos.',
+                    retryAfter: response.headers?.get('retry-after') || 60
+                };
+            
+            case 500:
+            case 502:
+            case 503:
+                return {
+                    type: 'SERVER_ERROR',
+                    message: 'Error del servidor',
+                    userMessage: 'El servidor está experimentando problemas. Usando generación local como alternativa.',
+                    fallback: true
+                };
+            
+            case 400:
+                return {
+                    type: 'BAD_REQUEST',
+                    message: 'Solicitud inválida',
+                    userMessage: 'Los datos enviados no son válidos. Intenta con una descripción diferente.',
+                    fallback: false
+                };
+            
+            default:
+                return {
+                    type: 'UNKNOWN_ERROR',
+                    message: `Error desconocido: ${response.status}`,
+                    userMessage: 'Ocurrió un error inesperado. Usando generación local como alternativa.',
+                    fallback: true
+                };
+        }
+    }
+}
+
+// ====================
+// AUTO SAVE MANAGER CLASS
+// ====================
+class AutoSaveManager {
+    constructor(saveFunction, interval = 2000) {
+        this.saveFunction = saveFunction;
+        this.interval = interval;
+        this.isDirty = false;
+        this.isSaving = false;
+        this.saveTimeout = null;
+    }
+    
+    markDirty() {
+        this.isDirty = true;
+        this.updateIndicator('pending');
+        this.scheduleSave();
+    }
+    
+    async scheduleSave() {
+        if (this.saveTimeout) clearTimeout(this.saveTimeout);
+        
+        this.saveTimeout = setTimeout(async () => {
+            if (this.isDirty && !this.isSaving) {
+                this.isSaving = true;
+                this.updateIndicator('saving');
+                
+                try {
+                    await this.saveFunction();
+                    this.isDirty = false;
+                    this.updateIndicator('saved');
+                    
+                    setTimeout(() => {
+                        if (!this.isDirty) {
+                            this.updateIndicator('idle');
+                        }
+                    }, 2000);
+                } catch (error) {
+                    console.error('Error saving:', error);
+                    this.updateIndicator('error');
+                    setTimeout(() => this.updateIndicator('idle'), 3000);
+                }
+                
+                this.isSaving = false;
+            }
+        }, this.interval);
+    }
+    
+    updateIndicator(state) {
+        const indicator = document.getElementById('saveIndicator');
+        if (!indicator) return;
+        
+        const states = {
+            idle: { text: '', className: '' },
+            pending: { text: '● Cambios sin guardar', className: '' },
+            saving: { text: '⟳ Guardando...', className: 'saving' },
+            saved: { text: '✓ Guardado', className: 'saved' },
+            error: { text: '✕ Error al guardar', className: 'error' }
+        };
+        
+        const stateConfig = states[state];
+        indicator.textContent = stateConfig.text;
+        indicator.className = 'save-indicator ' + stateConfig.className;
+    }
+}
+
+// ====================
+// PROGRESS TRACKER CLASS
+// ====================
+class ProgressTracker {
+    constructor(steps) {
+        this.steps = steps;
+        this.currentStep = 0;
+    }
+    
+    async execute() {
+        for (let i = 0; i < this.steps.length; i++) {
+            this.currentStep = i;
+            const step = this.steps[i];
+            
+            this.updateProgress(step.name, (i / this.steps.length) * 100);
+            
+            try {
+                await step.action();
+            } catch (error) {
+                console.error(`Error in step ${step.name}:`, error);
+                throw error;
+            }
+        }
+        
+        this.updateProgress('Completado', 100);
+    }
+    
+    updateProgress(stepName, percentage) {
+        const loadingText = document.getElementById('loadingText');
+        const progressContainer = document.getElementById('loadingProgress');
+        const progressFill = document.getElementById('progressFill');
+        const progressText = document.getElementById('progressText');
+        
+        if (loadingText) loadingText.textContent = stepName;
+        if (progressContainer) progressContainer.style.display = 'block';
+        if (progressFill) progressFill.style.width = percentage + '%';
+        if (progressText) progressText.textContent = Math.round(percentage) + '%';
+    }
+}
+
+// ====================
 // DATA COMPRESSOR CLASS
 // ====================
 class DataCompressor {
@@ -5321,7 +6268,54 @@ function saveProjects() {
     }
 }
 
+// ========== Auto-resize Textareas ==========
+function autoResizeTextarea(textarea) {
+    if (!textarea) return;
+    textarea.style.height = 'auto';
+    textarea.style.height = textarea.scrollHeight + 'px';
+}
+
+function setupAutoResizeTextareas() {
+    // Aplicar a todos los textareas existentes
+    document.querySelectorAll('textarea').forEach(textarea => {
+        // Auto-resize inicial
+        autoResizeTextarea(textarea);
+        
+        // Auto-resize en input
+        textarea.addEventListener('input', () => autoResizeTextarea(textarea));
+        
+        // Auto-resize en focus (por si el contenido cambió)
+        textarea.addEventListener('focus', () => autoResizeTextarea(textarea));
+    });
+    
+    // Observer para nuevos textareas que se agreguen dinámicamente
+    const observer = new MutationObserver((mutations) => {
+        mutations.forEach((mutation) => {
+            mutation.addedNodes.forEach((node) => {
+                if (node.nodeType === 1) { // Element node
+                    if (node.tagName === 'TEXTAREA') {
+                        autoResizeTextarea(node);
+                        node.addEventListener('input', () => autoResizeTextarea(node));
+                        node.addEventListener('focus', () => autoResizeTextarea(node));
+                    }
+                    // También buscar textareas dentro de nodos agregados
+                    node.querySelectorAll?.('textarea').forEach(textarea => {
+                        autoResizeTextarea(textarea);
+                        textarea.addEventListener('input', () => autoResizeTextarea(textarea));
+                        textarea.addEventListener('focus', () => autoResizeTextarea(textarea));
+                    });
+                }
+            });
+        });
+    });
+    
+    observer.observe(document.body, { childList: true, subtree: true });
+}
+
 function setupGlobalEventListeners() {
+    // Setup auto-resize for all textareas
+    setupAutoResizeTextareas();
+    
     // Tab buttons
     document.querySelectorAll('.tab-btn').forEach(btn => {
         btn.addEventListener('click', () => switchTab(btn.dataset.tab));
@@ -6013,11 +7007,11 @@ function redoChange() {
 }
 
 function showVersions() {
-    if (app) app.showHistoryModal();
+    showVersionsModal();
 }
 
 function showShareDialog() {
-    if (app) app.showNotification('Función de compartir próximamente');
+    showShareModal();
 }
 
 function exportProject() {
@@ -6054,6 +7048,307 @@ if (document.readyState === 'loading') {
     initTheme();
 }
 
+// ========== Alignment Control Functions ==========
+
+async function regenerateWithFocus() {
+    if (!state.currentProjectId) return;
+    
+    const project = state.projects.find(p => p.id === state.currentProjectId);
+    if (!project) return;
+    
+    if (!confirm('¿Regenerar el proyecto enfocándote más en tu descripción original?\n\nEsto mantendrá los conceptos clave de tu descripción y evitará agregar funcionalidades no solicitadas.')) {
+        return;
+    }
+    
+    // Show loading
+    const alignmentPanel = document.querySelector('[style*="alignment"]');
+    if (alignmentPanel) {
+        alignmentPanel.innerHTML = `
+            <div style="text-align: center; padding: 40px;">
+                <div style="font-size: 2rem; margin-bottom: 16px;">⏳</div>
+                <div style="color: var(--text-primary); font-weight: 500;">Regenerando con mayor foco...</div>
+                <div style="color: var(--text-muted); font-size: 0.85rem; margin-top: 8px;">Analizando tu descripción original</div>
+            </div>
+        `;
+    }
+    
+    try {
+        const apiKey = document.getElementById('apiKeyInput')?.value?.trim();
+        const name = project.name;
+        const category = project.category;
+        const description = project.expandedDescription || project.description;
+        
+        let newData;
+        
+        if (apiKey) {
+            // Regenerar con API usando prompt más estricto
+            newData = await generateProjectDataWithFocus(name, category, description, apiKey);
+        } else {
+            // Regenerar localmente de forma más conservadora
+            newData = generateProjectData(name, category, description);
+            // Mantener solo conceptos de la descripción original
+            newData = filterToOriginalConcepts(newData, description);
+        }
+        
+        // Actualizar proyecto
+        project.data = newData;
+        project.updatedAt = new Date().toISOString();
+        
+        saveProjects();
+        
+        // Refrescar vista
+        populateOverview(project);
+        
+        if (app) {
+            app.showNotification('Proyecto regenerado con mayor alineación', 'success');
+        }
+    } catch (error) {
+        console.error('Error regenerating:', error);
+        if (app) {
+            app.showNotification('Error al regenerar. Intenta ajustar manualmente.', 'error');
+        }
+        // Restaurar vista
+        populateOverview(project);
+    }
+}
+
+async function generateProjectDataWithFocus(name, category, description, apiKey) {
+    const enhancedPrompt = `IMPORTANTE: MANTENTE ESTRICTAMENTE FIEL a la descripción proporcionada.
+
+=== REGLAS DE NO DESVIACIÓN ===
+1. USA las MISMAS palabras clave de la descripción
+2. EXPANDE solo los conceptos YA mencionados
+3. NO inventes funcionalidades adicionales
+4. MANTÉN el alcance definido por el usuario
+5. Si algo no está mencionado, NO lo agregues
+
+=== DESCRIPCIÓN ORIGINAL (FUENTE DE VERDAD) ===
+${description}
+
+=== TU TAREA ===
+Genera un análisis que:
+- Refleje EXACTAMENTE lo que el usuario describió
+- Use terminología consistente con la descripción
+- No agregue características no solicitadas
+- Priorice los conceptos explícitamente mencionados`;
+
+    try {
+        const response = await fetch('https://api.anthropic.com/v1/messages', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'x-api-key': apiKey,
+                'anthropic-version': '2023-06-01',
+                'anthropic-dangerous-direct-browser-access': 'true'
+            },
+            body: JSON.stringify({
+                model: 'claude-sonnet-4-20250514',
+                max_tokens: 4000,
+                messages: [{
+                    role: 'user',
+                    content: `${enhancedPrompt}
+
+Genera los datos del proyecto "${name}" (categoría: ${category}) en formato JSON con:
+- whatIs, targetAudience, needsSolved, mainFeatures, competition, businessModel
+- flows (mvp, intermediate, complete)
+- tokens (colors, typography, spacing, borderRadius)
+- metrics
+
+RESPONDE SOLO CON JSON VÁLIDO.`
+                }]
+            })
+        });
+        
+        if (!response.ok) {
+            throw new Error('API error');
+        }
+        
+        const data = await response.json();
+        const content = data.content[0].text;
+        
+        // Extraer JSON
+        const jsonMatch = content.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+            return JSON.parse(jsonMatch[0]);
+        }
+        
+        throw new Error('No JSON found');
+    } catch (error) {
+        console.error('API regeneration failed:', error);
+        // Fallback a generación local
+        return generateProjectData(name, category, description);
+    }
+}
+
+function filterToOriginalConcepts(data, description) {
+    // Extraer palabras clave de la descripción
+    const descWords = new Set(
+        description.toLowerCase()
+            .split(/\s+/)
+            .filter(w => w.length > 3)
+    );
+    
+    // Filtrar features para mantener solo los relacionados
+    if (data.mainFeatures) {
+        const features = data.mainFeatures.split('\n').filter(f => {
+            const words = f.toLowerCase().split(/\s+/);
+            return words.some(w => descWords.has(w) || w.length > 6);
+        });
+        data.mainFeatures = features.slice(0, 8).join('\n');
+    }
+    
+    return data;
+}
+
+function adjustGeneration() {
+    if (!state.currentProjectId) return;
+    
+    const project = state.projects.find(p => p.id === state.currentProjectId);
+    if (!project) return;
+    
+    // Aprobar y permitir edición manual
+    project.overviewApproved = true;
+    saveProjects();
+    
+    // Mostrar vista de edición
+    const overviewSection = document.getElementById('overviewSection');
+    const mainTabs = document.getElementById('mainTabs');
+    const promptBuilder = document.getElementById('promptBuilder');
+    
+    if (overviewSection) overviewSection.style.display = 'none';
+    if (mainTabs) mainTabs.style.display = 'block';
+    if (promptBuilder) promptBuilder.style.display = 'block';
+    
+    // Poblar campos
+    populateProjectFields(project.data);
+    
+    // Cambiar a tab de flujos
+    switchTab('flows');
+    
+    // Hacer todos los campos editables
+    document.querySelectorAll('.content-block textarea, .content-block input').forEach(el => {
+        el.disabled = false;
+        el.readOnly = false;
+    });
+    
+    if (app) {
+        app.showNotification('Modo de edición activado. Ajusta los campos según necesites.', 'info');
+    }
+}
+
+function showAlignmentDetails() {
+    if (!state.currentProjectId) return;
+    
+    const project = state.projects.find(p => p.id === state.currentProjectId);
+    if (!project) return;
+    
+    const userInput = {
+        name: project.name,
+        category: project.category,
+        description: project.expandedDescription || project.description
+    };
+    
+    const analysis = AlignmentAnalyzer.analyze(userInput, project.data);
+    
+    // Crear modal con detalles completos
+    const modal = document.createElement('div');
+    modal.className = 'modal active';
+    modal.id = 'alignmentDetailsModal';
+    modal.innerHTML = `
+        <div class="modal-content" style="max-width: 700px; max-height: 80vh; overflow-y: auto;">
+            <div class="modal-header">
+                <h3>🔍 Análisis Detallado de Alineación</h3>
+                <button class="close-modal" onclick="document.getElementById('alignmentDetailsModal').remove()">&times;</button>
+            </div>
+            <div class="modal-body" style="padding: 20px;">
+                <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 24px;">
+                    <div style="padding: 16px; background: var(--bg-tertiary); border-radius: var(--radius-md); text-align: center;">
+                        <div style="font-size: 2rem; font-weight: 700; color: ${analysis.score >= 70 ? 'var(--success)' : analysis.score >= 50 ? 'var(--warning)' : 'var(--error)'};">${Math.round(analysis.score)}%</div>
+                        <div style="font-size: 0.85rem; color: var(--text-muted);">Puntuación Total</div>
+                    </div>
+                    <div style="padding: 16px; background: var(--bg-tertiary); border-radius: var(--radius-md); text-align: center;">
+                        <div style="font-size: 2rem; font-weight: 700; color: var(--accent-primary);">${analysis.matched.length}</div>
+                        <div style="font-size: 0.85rem; color: var(--text-muted);">Conceptos Encontrados</div>
+                    </div>
+                    <div style="padding: 16px; background: var(--bg-tertiary); border-radius: var(--radius-md); text-align: center;">
+                        <div style="font-size: 2rem; font-weight: 700; color: var(--error);">${analysis.missing.length}</div>
+                        <div style="font-size: 0.85rem; color: var(--text-muted);">Conceptos Faltantes</div>
+                    </div>
+                </div>
+                
+                <div style="margin-bottom: 20px;">
+                    <h4 style="margin-bottom: 12px; color: var(--success);">✓ Palabras Clave Encontradas</h4>
+                    <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+                        ${analysis.matched.map(k => `<span style="padding: 6px 12px; background: rgba(34, 197, 94, 0.2); color: var(--success); border-radius: 20px; font-size: 0.8rem;">✓ ${k}</span>`).join('')}
+                        ${analysis.matched.length === 0 ? '<span style="color: var(--text-muted);">Ninguno</span>' : ''}
+                    </div>
+                </div>
+                
+                ${analysis.missing.length > 0 ? `
+                <div style="margin-bottom: 20px;">
+                    <h4 style="margin-bottom: 12px; color: var(--error);">✕ Palabras Clave Faltantes</h4>
+                    <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 12px;">Estas palabras de tu descripción no aparecen en el contenido generado:</p>
+                    <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+                        ${analysis.missing.map(k => `<span style="padding: 6px 12px; background: rgba(239, 68, 68, 0.2); color: var(--error); border-radius: 20px; font-size: 0.8rem;">✕ ${k}</span>`).join('')}
+                    </div>
+                </div>
+                ` : ''}
+                
+                ${analysis.extra.length > 0 ? `
+                <div style="margin-bottom: 20px;">
+                    <h4 style="margin-bottom: 12px; color: var(--warning);">⚠ Conceptos Adicionales</h4>
+                    <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 12px;">Estos conceptos fueron agregados pero no estaban en tu descripción:</p>
+                    <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+                        ${analysis.extra.map(k => `<span style="padding: 6px 12px; background: rgba(251, 191, 36, 0.2); color: var(--warning); border-radius: 20px; font-size: 0.8rem;">⚠ ${k}</span>`).join('')}
+                    </div>
+                    <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 8px; font-style: italic;">¿Estos conceptos se alinean con tu visión? Si no, considera regenerar o ajustar manualmente.</p>
+                </div>
+                ` : ''}
+                
+                <div style="padding: 16px; background: var(--bg-secondary); border-radius: var(--radius-md);">
+                    <h4 style="margin-bottom: 12px;">📊 Métricas Detalladas</h4>
+                    <div style="display: grid; gap: 12px;">
+                        <div>
+                            <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                                <span style="font-size: 0.85rem;">Cobertura de Palabras Clave</span>
+                                <span style="font-weight: 600;">${Math.round(analysis.keywordCoverage)}%</span>
+                            </div>
+                            <div style="height: 8px; background: var(--bg-tertiary); border-radius: 4px; overflow: hidden;">
+                                <div style="height: 100%; width: ${analysis.keywordCoverage}%; background: var(--accent-primary); border-radius: 4px;"></div>
+                            </div>
+                        </div>
+                        <div>
+                            <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                                <span style="font-size: 0.85rem;">Alineación con Categoría</span>
+                                <span style="font-weight: 600;">${Math.round(analysis.categoryAlignment)}%</span>
+                            </div>
+                            <div style="height: 8px; background: var(--bg-tertiary); border-radius: 4px; overflow: hidden;">
+                                <div style="height: 100%; width: ${analysis.categoryAlignment}%; background: var(--accent-secondary); border-radius: 4px;"></div>
+                            </div>
+                        </div>
+                        <div>
+                            <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                                <span style="font-size: 0.85rem;">Alineación Semántica</span>
+                                <span style="font-weight: 600;">${Math.round(analysis.semanticAlignment)}%</span>
+                            </div>
+                            <div style="height: 8px; background: var(--bg-tertiary); border-radius: 4px; overflow: hidden;">
+                                <div style="height: 100%; width: ${analysis.semanticAlignment}%; background: var(--success); border-radius: 4px;"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer" style="padding: 16px; border-top: 1px solid var(--border-color); display: flex; gap: 12px; justify-content: flex-end;">
+                ${analysis.score < 70 ? `<button onclick="document.getElementById('alignmentDetailsModal').remove(); regenerateWithFocus();" class="action-btn primary-btn">↻ Regenerar con Más Foco</button>` : ''}
+                <button onclick="document.getElementById('alignmentDetailsModal').remove(); adjustGeneration();" class="action-btn">🎯 Ajustar Manualmente</button>
+                <button onclick="document.getElementById('alignmentDetailsModal').remove();" class="action-btn">Cerrar</button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+}
+
 function regenerateExpandedDescription() {
     const btn = document.getElementById('regenerateExpandedBtn');
     const textarea = document.getElementById('expandedDescription');
@@ -6083,6 +7378,8 @@ function editExpandedDescription() {
             textarea.style.borderColor = 'var(--accent-primary)';
             textarea.focus();
             if (btn) btn.innerHTML = '💾 Guardar';
+            // Auto-resize al editar
+            autoResizeTextarea(textarea);
         } else {
             textarea.readOnly = true;
             textarea.style.background = 'var(--bg-primary)';
@@ -6128,6 +7425,8 @@ async function expandDescription() {
         
         if (textarea) {
             textarea.value = expandedDesc;
+            // Auto-resize después de cargar contenido
+            autoResizeTextarea(textarea);
         }
         
         // Hide expand button, show regenerate and edit
@@ -6208,21 +7507,40 @@ async function expandWithAI(projectName, shortDesc, category, apiKey) {
     }
     
     try {
-        const prompt = `Eres un experto en diseño UX/UI y producto. Dado el siguiente proyecto, expande y refina la descripción de manera profesional y detallada.
+        // Sanitizar inputs
+        const safeName = projectName.replace(/[<>&"']/g, '');
+        const safeCategory = (category || 'General').replace(/[<>&"']/g, '');
+        const safeDescription = shortDesc.replace(/[<>&"']/g, '');
+        
+        const prompt = `Eres un experto en UX/UI y product management. El usuario ha proporcionado esta información básica sobre su proyecto:
 
-Proyecto: ${projectName}
-Categoría: ${category || 'General'}
-Descripción breve: ${shortDesc}
+NOMBRE: ${safeName}
+CATEGORÍA: ${safeCategory}
+DESCRIPCIÓN BREVE: ${safeDescription}
 
-Genera una descripción expandida que incluya:
-1. Visión general del proyecto
-2. Objetivos principales
-3. Público objetivo
-4. Problemas que resuelve
-5. Propuesta de valor
-6. Características clave
+Tu tarea es expandir y refinar esta descripción breve en una descripción completa y clara que servirá como guía maestra para todo el proceso de diseño. La descripción expandida debe:
 
-La descripción debe ser clara, profesional y enfocada en UX/UI.`;
+1. Clarificar el propósito central del proyecto
+2. Identificar el problema específico que resuelve
+3. Describir la propuesta de valor principal
+4. Definir claramente qué hace y qué NO hace el producto
+5. Establecer el alcance básico de funcionalidades
+6. Ser concisa pero completa (2-3 párrafos, máximo 400 palabras)
+7. Usar lenguaje claro y profesional
+8. Mantener fidelidad absoluta a la intención original del usuario
+
+IMPORTANTE - REGLAS DE NO DESVIACIÓN:
+- NO inventes funcionalidades que el usuario no mencionó
+- NO expandas el alcance más allá de lo que el usuario describió
+- NO agregues features "nice to have" que no estén implícitas
+- SI el usuario fue vago, haz suposiciones razonables basadas SOLO en la categoría
+- Enfócate en clarificar y estructurar, no en agregar features
+- Mantén el enfoque específico del proyecto, no lo generalices
+- Cada punto que menciones debe poder trazarse a la descripción original
+
+Esta descripción expandida será usada como ANCLA para todas las generaciones posteriores (flujos, pantallas, componentes). Si te desvías aquí, todo el proyecto se desviará.
+
+Responde ÚNICAMENTE con la descripción expandida, sin introducciones, sin markdown, sin explicaciones adicionales.`;
 
         if (app && app.progressBar) app.progressBar.update(50);
 
@@ -6581,228 +7899,425 @@ Stack tecnológico sugerido: Next.js o React con TypeScript para una aplicación
     }
 }
 
-function generateFlows(name, category) {
-    const flows = {
-        mvp: [
-            { screen: 'Splash / Loading', description: `Pantalla inicial con logo de ${name} y carga de recursos`, elements: ['Logo animado', 'Progress indicator', 'Versión de app'], context: 'Primera impresión', globalElements: { header: false, bottomNav: false, sidebar: false }, layout: { pattern: 'Fullscreen centered', recommendation: 'Logo centrado con animación sutil' }, navigation: { level: 'entry', accessFrom: 'App launch' } },
-            { screen: 'Onboarding', description: `Introducción al valor de ${name} en 3-4 slides`, elements: ['Ilustraciones', 'Títulos impactantes', 'Dots de progreso', 'Skip button', 'CTA final'], context: 'Educación del usuario', globalElements: { header: false, bottomNav: false, sidebar: false }, layout: { pattern: 'Carousel horizontal', recommendation: 'Swipeable slides con progreso visible' }, navigation: { level: 'entry', accessFrom: 'After splash (first time)' } },
-            { screen: 'Login / Registro', description: 'Autenticación de usuarios', elements: ['Email input', 'Password input', 'Social login buttons', 'Forgot password link'], context: 'Autenticación', globalElements: { header: false, bottomNav: false, sidebar: false, note: 'Solo logo de marca' }, layout: { pattern: 'Form centered', recommendation: 'Inputs amplios, CTAs prominentes' }, navigation: { level: 'entry', accessFrom: 'Onboarding completion' } },
-            { screen: 'Dashboard Principal', description: `Vista principal de ${name}`, elements: ['Header con perfil', 'Cards de contenido', 'Quick actions', 'Bottom navigation'], context: 'Hub central', globalElements: { header: true, bottomNav: true, sidebar: false }, layout: { pattern: 'Cards grid / List', recommendation: 'Contenido prioritario visible sin scroll' }, navigation: { level: 'primary', accessFrom: 'Bottom nav - Home' } },
-            { screen: 'Perfil de Usuario', description: 'Configuración y datos del usuario', elements: ['Avatar', 'Datos personales', 'Preferencias', 'Logout button'], context: 'Gestión de cuenta', globalElements: { header: true, bottomNav: true, sidebar: false }, layout: { pattern: 'Sectioned list', recommendation: 'Secciones colapsables para organización' }, navigation: { level: 'primary', accessFrom: 'Bottom nav - Profile' } }
-        ],
-        intermediate: [
-            { screen: 'Búsqueda', description: 'Sistema de búsqueda de contenido', elements: ['Search bar', 'Filtros básicos', 'Resultados en lista/grid', 'Historial reciente'], context: 'Descubrimiento', globalElements: { header: true, bottomNav: true, sidebar: false }, layout: { pattern: 'Search + Results list', recommendation: 'Search bar sticky, resultados scrollables' }, navigation: { level: 'primary', accessFrom: 'Bottom nav - Search' } },
-            { screen: 'Detalle', description: 'Vista detallada de contenido', elements: ['Hero image', 'Información completa', 'Actions principales', 'Contenido relacionado'], context: 'Información profunda', globalElements: { header: true, bottomNav: false, sidebar: false, note: 'Header con back button' }, layout: { pattern: 'Hero + Content scroll', recommendation: 'Hero collapsible en scroll' }, navigation: { level: 'secondary', accessFrom: 'Any list or card tap' } },
-            { screen: 'Feed', description: `Feed de actividad de ${name}`, elements: ['Posts/Items en scroll', 'Refresh pull', 'Filtros de contenido', 'Infinite scroll'], context: 'Contenido dinámico', globalElements: { header: true, bottomNav: true, sidebar: false }, layout: { pattern: 'Infinite scroll list', recommendation: 'Pull to refresh, loading states' }, navigation: { level: 'primary', accessFrom: 'Bottom nav - Feed' } },
-            { screen: 'Notificaciones', description: 'Centro de notificaciones', elements: ['Lista de notificaciones', 'Filtros por tipo', 'Mark as read', 'Settings rápidos'], context: 'Comunicación', globalElements: { header: true, bottomNav: true, sidebar: false }, layout: { pattern: 'Grouped list', recommendation: 'Agrupado por fecha/tipo' }, navigation: { level: 'secondary', accessFrom: 'Header notification icon' } },
-            { screen: 'Configuración', description: 'Ajustes y preferencias', elements: ['Sections organizadas', 'Preferencias de app', 'Notificaciones', 'Privacidad'], context: 'Personalización', globalElements: { header: true, bottomNav: true, sidebar: false }, layout: { pattern: 'Settings list', recommendation: 'Secciones con iconos descriptivos' }, navigation: { level: 'secondary', accessFrom: 'Profile menu' } },
-            { screen: 'Guardados', description: 'Contenido guardado', elements: ['Lista de guardados', 'Organización por categorías', 'Quick access', 'Opciones de compartir'], context: 'Contenido personal', globalElements: { header: true, bottomNav: true, sidebar: false }, layout: { pattern: 'Filterable grid/list', recommendation: 'Toggle view, filtros visibles' }, navigation: { level: 'secondary', accessFrom: 'Profile or dedicated tab' } },
-            { screen: 'Historial', description: 'Historial de actividad', elements: ['Timeline de actividad', 'Filtros temporales', 'Estadísticas básicas'], context: 'Registro de uso', globalElements: { header: true, bottomNav: true, sidebar: false }, layout: { pattern: 'Timeline vertical', recommendation: 'Agrupado por fecha con separadores' }, navigation: { level: 'secondary', accessFrom: 'Profile menu' } },
-            { screen: 'Ayuda / FAQ', description: 'Centro de soporte básico', elements: ['Preguntas frecuentes', 'Search en FAQs', 'Contact support'], context: 'Soporte', globalElements: { header: true, bottomNav: false, sidebar: false }, layout: { pattern: 'Accordion list', recommendation: 'FAQs expandibles con search' }, navigation: { level: 'secondary', accessFrom: 'Settings or footer' } }
-        ],
-        complete: [
-            { screen: 'Búsqueda Avanzada', description: 'Motor de búsqueda completo con IA', elements: ['Search bar con NLP', 'Filtros avanzados', 'Voice search', 'Visual search'], context: 'Descubrimiento avanzado', globalElements: { header: true, bottomNav: true, sidebar: false }, layout: { pattern: 'Multi-filter search', recommendation: 'Filtros en modal o drawer' }, navigation: { level: 'primary', accessFrom: 'Search enhancement' } },
-            { screen: 'Detalle Expandido', description: 'Información completa con interacciones', elements: ['Hero media 360°', 'AR preview', 'Reviews verificados', 'Comparador'], context: 'Información inmersiva', globalElements: { header: true, bottomNav: false, sidebar: false }, layout: { pattern: 'Immersive detail', recommendation: 'Media fullscreen, tabs de info' }, navigation: { level: 'secondary', accessFrom: 'Detail enhancement' } },
-            { screen: 'Crear/Editar', description: 'Herramientas de creación', elements: ['Form builder', 'Media upload', 'Rich text editor', 'Preview', 'Autosave'], context: 'Creación de contenido', globalElements: { header: true, bottomNav: false, sidebar: false, note: 'Header con save/cancel' }, layout: { pattern: 'Multi-step form', recommendation: 'Progress bar, preview flotante' }, navigation: { level: 'secondary', accessFrom: 'FAB or create button' } },
-            { screen: 'Mensajería', description: 'Sistema de mensajería en tiempo real', elements: ['Lista de conversaciones', 'Chat interface', 'Media sharing', 'Reactions'], context: 'Comunicación directa', globalElements: { header: true, bottomNav: true, sidebar: false }, layout: { pattern: 'Split view / Chat', recommendation: 'Input sticky, messages scrollables' }, navigation: { level: 'primary', accessFrom: 'Bottom nav - Messages' } },
-            { screen: 'Analytics', description: 'Métricas y estadísticas', elements: ['Usage dashboard', 'Goal tracking', 'Charts interactivos', 'Reports exportables'], context: 'Insights', globalElements: { header: true, bottomNav: true, sidebar: true }, layout: { pattern: 'Dashboard grid', recommendation: 'Widgets reordenables' }, navigation: { level: 'secondary', accessFrom: 'Profile or dedicated section' } },
-            { screen: 'Social Hub', description: 'Centro de interacciones sociales', elements: ['Following/Followers', 'Activity feed', 'Grupos', 'Events'], context: 'Comunidad', globalElements: { header: true, bottomNav: true, sidebar: false }, layout: { pattern: 'Tab navigation', recommendation: 'Tabs por tipo de contenido social' }, navigation: { level: 'primary', accessFrom: 'Bottom nav - Community' } },
-            { screen: 'Biblioteca', description: 'Organización de contenido', elements: ['Collections', 'Tags', 'Folders', 'Sort/Filter options', 'Bulk actions'], context: 'Organización personal', globalElements: { header: true, bottomNav: true, sidebar: true }, layout: { pattern: 'File browser', recommendation: 'Grid/List toggle, breadcrumbs' }, navigation: { level: 'secondary', accessFrom: 'Profile or saved' } },
-            { screen: 'Calendario', description: 'Gestión de eventos', elements: ['Calendar view', 'Event creation', 'Reminders', 'Sync options'], context: 'Planificación', globalElements: { header: true, bottomNav: true, sidebar: false }, layout: { pattern: 'Calendar + List', recommendation: 'Month/Week/Day views' }, navigation: { level: 'secondary', accessFrom: 'Dashboard or dedicated' } },
-            { screen: 'Centro de Ayuda Pro', description: 'Soporte completo multicanal', elements: ['AI chatbot', 'FAQs dinámicas', 'Live chat', 'Ticket system'], context: 'Soporte premium', globalElements: { header: true, bottomNav: false, sidebar: false }, layout: { pattern: 'Chat + Resources', recommendation: 'Bot prominente, recursos secundarios' }, navigation: { level: 'tertiary', accessFrom: 'Settings - Help' } },
-            { screen: 'Admin Panel', description: 'Panel de administración', elements: ['User management', 'Content moderation', 'Analytics dashboard', 'Settings globales'], context: 'Administración', globalElements: { header: true, bottomNav: false, sidebar: true }, layout: { pattern: 'Admin dashboard', recommendation: 'Sidebar nav, data tables' }, navigation: { level: 'admin', accessFrom: 'Admin access only' } }
-        ]
-    };
+// ====================
+// SCREEN ARCHITECTURE CLASS
+// ====================
+class ScreenArchitecture {
+    static analyzeScreenStructure(appType = '', category = '', projectName = '') {
+        const isMobile = appType.toLowerCase().includes('mobile');
+        const isWeb = appType.toLowerCase().includes('web') || !isMobile;
+        
+        return {
+            generalRules: this.defineGeneralRules(category, projectName),
+            globalElements: this.defineGlobalElements(isMobile, isWeb),
+            screenTypes: this.defineScreenTypes(),
+            layoutPatterns: this.defineLayoutPatterns(isMobile, isWeb, category),
+            navigationFlow: this.defineNavigationFlow(isMobile, isWeb),
+            consistencyRules: this.defineConsistencyRules(isMobile, isWeb)
+        };
+    }
     
-    // Add architecture metadata
-    flows._architecture = generateArchitecture(name, category);
-    
-    return flows;
-}
-
-function generateArchitecture(name, category) {
-    return {
-        generalRules: {
+    static defineGeneralRules(category, projectName = '') {
+        // Generar nombre formateado para branding
+        const name = projectName || 'NombreApp';
+        const nameLower = name.toLowerCase().replace(/\s+/g, '');
+        const nameShort = name.length > 10 ? name.substring(0, 10) : name;
+        
+        // Generar tagline dinámico según categoría
+        const categoryTaglines = {
+            fintech: 'Tu aliado financiero',
+            healthtech: 'Tu salud, nuestra prioridad',
+            edtech: 'Aprende sin límites',
+            ecommerce: 'Compra fácil y seguro',
+            social: 'Conecta con tu mundo',
+            productivity: 'Trabaja más inteligente',
+            entertainment: 'Tu entretenimiento, a tu manera',
+            travel: 'Viaja como siempre soñaste',
+            food: 'Tu comida favorita, más cerca',
+            other: 'La solución que necesitas'
+        };
+        const tagline = categoryTaglines[category] || categoryTaglines.other;
+        
+        return {
             language: {
                 primary: 'Español (es-ES)',
-                fallback: 'Inglés (en-US)',
+                fallback: 'Inglés (en-US) como segundo idioma',
                 rules: [
                     'Todo el contenido UI debe estar en español',
                     'Mensajes de error y validación en español',
                     'Textos de ayuda y tooltips en español',
                     'Notificaciones push en español',
+                    'Emails transaccionales en español',
                     'Formateo de fechas: dd/mm/yyyy',
                     'Formateo de números: 1.234,56 (coma decimal)',
-                    'Moneda: $ según región'
+                    'Moneda: $ (pesos) o especificar según región'
                 ],
                 localization: {
                     dateFormat: 'dd/MM/yyyy',
                     timeFormat: 'HH:mm (24 horas)',
-                    numberFormat: '1.234,56'
+                    numberFormat: '1.234,56',
+                    currency: 'ARS, MXN, COP según región',
+                    rtl: false
                 }
             },
             branding: {
                 naming: {
-                    rule: 'Nombre comercial consistente en toda la aplicación',
+                    rule: `Nombre comercial "${name}" consistente en toda la aplicación`,
                     locations: [
-                        'Splash screen: Logo + nombre completo',
-                        'App bar/Header: Logo o nombre reducido',
-                        'Login/Registro: Nombre completo con tagline',
-                        'Emails: Nombre en header y firma',
-                        'Notificaciones: Nombre como remitente'
+                        `Splash screen: Logo de ${name} + nombre completo`,
+                        `App bar/Header: Logo de ${name} o "${nameShort}"`,
+                        `Login/Registro: "${name}" completo con tagline`,
+                        `Emails: "${name}" en header y firma`,
+                        `Notificaciones: "${name}" como remitente`,
+                        'App stores: Nombre idéntico',
+                        `Redes sociales: "${name}" y @${nameLower} consistentes`
                     ],
                     formats: {
                         full: `${name}™`,
-                        short: name,
-                        tagline: `${name} - Tu solución ideal`,
-                        domain: `${name.toLowerCase().replace(/\s+/g, '')}.com`
+                        short: nameShort,
+                        tagline: `${name} - ${tagline}`,
+                        domain: `${nameLower}.com`,
+                        handle: `@${nameLower}`
                     }
                 },
                 icon: {
                     rule: 'Ícono representativo y consistente',
+                    usage: [
+                        'App icon: Versión completa con degradado/sombras',
+                        'Favicon: Versión simplificada 16x16, 32x32',
+                        'PWA icons: 192x192, 512x512',
+                        'Touch icons: 180x180 (iOS)',
+                        'Splash screen: Versión animada o estática',
+                        'Notificaciones: Small icon (24x24dp Android)',
+                        'Header: Mini logo 32-40px height'
+                    ],
                     specifications: {
                         style: 'Moderno, minimalista, memorable',
                         colors: 'Máximo 3 colores principales',
-                        scalability: 'Legible desde 16x16 hasta 512x512'
+                        contrast: 'Funciona en fondos claros y oscuros',
+                        scalability: 'Legible desde 16x16 hasta 512x512',
+                        uniqueness: 'Distintivo, evita símbolos genéricos'
+                    },
+                    placement: {
+                        center: 'En splash, login, empty states',
+                        left: 'En headers/app bars',
+                        inline: 'En textos como marca registrada™'
                     }
+                },
+                colorScheme: {
+                    rule: 'Paleta de colores corporativa consistente',
+                    application: [
+                        'Logo: Colores oficiales de marca',
+                        'Botones primarios: Color de marca',
+                        'Links: Color de marca o variante',
+                        'Splash: Background con colores de marca',
+                        'Theme: Modo claro/oscuro con marca'
+                    ]
                 }
             },
             seo: {
-                rule: 'Optimización SEO en todas las pantallas',
+                rule: 'Todas las pantallas y contenidos optimizados para SEO',
                 general: [
-                    'Títulos descriptivos únicos por pantalla',
-                    'Meta descriptions relevantes',
-                    'URLs amigables',
+                    'Títulos descriptivos únicos por pantalla (50-60 caracteres)',
+                    'Meta descriptions relevantes (150-160 caracteres)',
+                    'URLs amigables: /producto/nombre-producto (no /prod?id=123)',
+                    'Estructura de headings: H1 único, H2-H6 jerárquicos',
                     'Imágenes con alt text descriptivo',
-                    'Schema markup para contenido estructurado'
+                    'Links internos con anchor text relevante',
+                    'Breadcrumbs para navegación y contexto',
+                    'Schema markup (JSON-LD) para contenido estructurado'
                 ],
                 contentRules: [
-                    'H1 único por página con keyword principal',
-                    'Jerarquía de headings H1-H6',
-                    'Párrafos legibles de 150-300 palabras'
+                    'H1: Título principal único por página (incluir keyword principal)',
+                    'H2: Secciones principales (incluir variaciones de keywords)',
+                    'H3-H6: Subsecciones en orden jerárquico',
+                    'Párrafos: 150-300 palabras, legibles, con keywords naturales',
+                    'Negritas: Para términos importantes y keywords secundarias',
+                    'Links: Texto descriptivo (no "click aquí"), 2-5 por página',
+                    'Listas: Usar <ul> y <ol> para mejorar escaneabilidad',
+                    'Imágenes: Alt text descriptivo con keywords cuando aplique'
                 ],
                 technical: [
-                    'Title tag optimizado',
-                    'Meta description con CTA',
-                    'Open Graph tags para redes sociales',
-                    'Sitemap XML actualizado'
+                    'Title tag: <title>Keyword Principal - Nombre App</title>',
+                    'Meta description: <meta name="description" content="Descripción con CTA">',
+                    'Canonical URL: <link rel="canonical" href="URL_oficial">',
+                    'Open Graph: og:title, og:description, og:image para redes',
+                    'Twitter Cards: twitter:card, twitter:title, twitter:image',
+                    'Robots meta: <meta name="robots" content="index, follow">',
+                    'Hreflang: <link rel="alternate" hreflang="es" href="...">',
+                    'Sitemap XML: Actualizado con todas las URLs',
+                    'Robots.txt: Permitir crawling de contenido público'
                 ],
                 performance: [
-                    'Core Web Vitals optimizados',
-                    'Mobile-first responsive design',
-                    'Lazy loading de imágenes',
-                    'CSS y JS minificados'
+                    'Core Web Vitals: LCP <2.5s, FID <100ms, CLS <0.1',
+                    'Mobile-first: Responsive design optimizado',
+                    'Lazy loading: Imágenes y contenido below-the-fold',
+                    'Compresión: Gzip/Brotli para HTML, CSS, JS',
+                    'Caché: Headers apropiados para recursos estáticos',
+                    'CDN: Servir assets desde CDN',
+                    'Minificación: CSS y JS minificados',
+                    'Critical CSS: Inline CSS crítico en <head>'
+                ],
+                accessibility: [
+                    'HTML semántico: <header>, <nav>, <main>, <article>, <footer>',
+                    'ARIA labels: Complementar HTML cuando sea necesario',
+                    'Skip links: Para navegación por teclado',
+                    'Focus visible: Indicadores claros de foco',
+                    'Contraste: WCAG AA mínimo (4.5:1)',
+                    'Texto escalable: No usar px fijos, usar rem/em',
+                    'Formularios: Labels asociados con inputs',
+                    'Tablas: Uso correcto de <th>, <caption>, scope'
                 ]
+            },
+            contentGuidelines: {
+                tone: {
+                    rule: 'Tono consistente en toda la aplicación',
+                    characteristics: [
+                        'Claro y directo',
+                        'Profesional pero accesible',
+                        'Evitar jerga técnica innecesaria',
+                        'Usar "tú" o "usted" consistentemente',
+                        'Positivo y orientado a soluciones',
+                        'Empático con el usuario'
+                    ]
+                },
+                copywriting: {
+                    buttons: [
+                        'Verbos de acción: "Crear cuenta", "Comenzar ahora", "Ver más"',
+                        'Claro sobre la acción: No usar "OK" o "Continuar" genéricos',
+                        'Contextual: "Guardar cambios", "Publicar artículo"'
+                    ],
+                    errors: [
+                        'Explicar qué salió mal',
+                        'Indicar cómo solucionarlo',
+                        'Tono empático: "No pudimos... Intenta..."',
+                        'Evitar culpar al usuario'
+                    ],
+                    emptyStates: [
+                        'Explicar por qué está vacío',
+                        'Sugerir acción siguiente',
+                        'Tono alentador',
+                        'CTA claro'
+                    ],
+                    success: [
+                        'Confirmar acción completada',
+                        'Indicar siguiente paso si aplica',
+                        'Tono positivo'
+                    ]
+                },
+                microcopy: {
+                    placeholders: 'Ejemplos claros: "nombre@ejemplo.com"',
+                    helperText: 'Guiar sin abrumar: "Mínimo 8 caracteres"',
+                    tooltips: 'Información adicional concisa',
+                    labels: 'Descriptivos y cortos: "Correo electrónico"'
+                }
             }
-        },
-        globalElements: {
+        };
+    }
+    
+    static defineGlobalElements(isMobile, isWeb) {
+        return {
             persistent: {
                 header: {
                     present: true,
                     excludeFrom: ['splash', 'onboarding', 'auth_screens'],
-                    height: '56-64px'
-                },
-                bottomNav: {
-                    present: true,
-                    excludeFrom: ['splash', 'onboarding', 'auth_screens', 'fullscreen_views'],
-                    height: '56px',
-                    items: 5
-                },
-                sidebar: {
-                    present: true,
-                    showOn: ['dashboard', 'settings', 'admin'],
-                    width: '240-280px'
+                    content: ['brand_logo', 'primary_navigation', 'user_menu', 'notifications'],
+                    variants: {
+                        mobile: {
+                            height: '56px',
+                            layout: 'compact',
+                            elements: ['hamburger_menu', 'logo', 'search_icon', 'profile_icon']
+                        },
+                        web: {
+                            height: '64-72px',
+                            layout: 'expanded',
+                            elements: ['logo', 'main_nav', 'search_bar', 'notifications', 'user_dropdown']
+                        }
+                    }
                 },
                 footer: {
-                    present: false,
-                    note: 'En mobile se usa Bottom Navigation en su lugar'
+                    present: isWeb,
+                    excludeFrom: ['splash', 'onboarding', 'modal_views', 'detail_views'],
+                    content: ['links', 'legal', 'social_media', 'contact'],
+                    note: 'En mobile se reemplaza por Bottom Navigation'
+                },
+                bottomNav: {
+                    present: isMobile,
+                    excludeFrom: ['splash', 'onboarding', 'auth_screens', 'fullscreen_views'],
+                    content: ['4-5 primary navigation items'],
+                    positions: ['home', 'search/explore', 'main_action', 'profile', 'more'],
+                    height: '56px',
+                    behavior: 'fixed_bottom'
+                },
+                sidebar: {
+                    present: isWeb,
+                    type: 'conditional',
+                    showOn: ['dashboard', 'settings', 'admin', 'content_management'],
+                    excludeFrom: ['landing', 'auth', 'checkout', 'focused_tasks'],
+                    width: '240-280px',
+                    collapsible: true
+                }
+            },
+            contextual: {
+                breadcrumbs: {
+                    present: isWeb,
+                    showOn: ['deep_navigation', 'hierarchical_content'],
+                    placement: 'below_header'
+                },
+                backButton: {
+                    present: isMobile,
+                    showOn: ['detail_views', 'sub_pages', 'forms'],
+                    behavior: 'native_navigation'
+                },
+                fab: {
+                    present: 'conditional',
+                    showOn: ['list_views', 'dashboard'],
+                    action: 'primary_creation_action',
+                    position: 'bottom_right',
+                    size: isMobile ? '56px' : '64px'
                 }
             }
-        },
-        screenTypes: {
+        };
+    }
+    
+    static defineScreenTypes() {
+        return {
             fullscreen: {
-                types: ['splash', 'onboarding', 'media_viewer'],
-                characteristics: 'Sin header, footer, ni navegación visible'
+                types: ['splash', 'onboarding', 'media_viewer', 'video_player'],
+                characteristics: 'Sin header, footer, ni navegación visible',
+                purpose: 'Inmersión total o primera impresión'
             },
             authScreens: {
-                types: ['login', 'register', 'forgot_password'],
-                characteristics: 'Solo logo/brand, sin navegación principal'
+                types: ['login', 'register', 'forgot_password', 'verification'],
+                characteristics: 'Solo logo/brand, sin navegación principal',
+                purpose: 'Enfoque total en autenticación'
             },
             mainScreens: {
                 types: ['home', 'dashboard', 'feed', 'explore'],
-                characteristics: 'Header + Bottom Nav (mobile) o Header + Sidebar (web)'
+                characteristics: 'Header + Bottom Nav (mobile) o Header + Sidebar (web)',
+                purpose: 'Navegación completa disponible'
             },
             detailScreens: {
                 types: ['item_detail', 'profile_view', 'article'],
-                characteristics: 'Header con back + contenido enfocado'
+                characteristics: 'Header con back + contenido enfocado',
+                purpose: 'Información detallada de un elemento'
             },
             formScreens: {
-                types: ['create', 'edit', 'settings'],
-                characteristics: 'Header + barra de progreso + acciones de guardado'
+                types: ['create', 'edit', 'settings', 'checkout'],
+                characteristics: 'Header + barra de progreso + acciones de guardado',
+                purpose: 'Captura o edición de datos'
+            },
+            modalScreens: {
+                types: ['overlays', 'bottom_sheets', 'dialogs'],
+                characteristics: 'Sobre contenido existente, con backdrop',
+                purpose: 'Acciones rápidas sin cambiar contexto'
             }
-        },
-        layoutPatterns: {
+        };
+    }
+    
+    static defineLayoutPatterns(isMobile, isWeb, category) {
+        return {
             mobile: {
                 list: {
                     pattern: 'Single column vertical scroll',
+                    spacing: '8-16px entre items',
+                    cardHeight: 'Variable según contenido',
                     useFor: ['feeds', 'listas', 'resultados']
                 },
                 grid: {
-                    pattern: '2-3 columns grid',
+                    pattern: '2-3 columns',
+                    spacing: '8-12px gap',
+                    aspectRatio: '1:1 o 4:3',
                     useFor: ['gallery', 'productos', 'categorías']
                 },
                 tabs: {
                     pattern: 'Horizontal scrollable tabs',
+                    placement: 'Below header',
+                    behavior: 'Swipeable content',
                     useFor: ['categorización', 'filtros', 'secciones']
                 }
             },
             web: {
                 sidebar_content: {
-                    pattern: 'Sidebar (240-280px) + Main content',
+                    pattern: 'Sidebar (240-280px) + Main content (flex-1)',
+                    sidebar: 'Fixed o sticky',
+                    content: 'Scrollable independently',
                     useFor: ['dashboards', 'admin', 'settings']
                 },
                 grid_responsive: {
-                    pattern: 'CSS Grid responsive',
+                    pattern: 'CSS Grid con auto-fit',
+                    columns: '3-4 en desktop, 2 en tablet, 1 en mobile',
+                    gap: '24-32px',
                     useFor: ['catálogos', 'portfolios', 'cards']
                 },
                 split_view: {
-                    pattern: 'Master-detail layout',
+                    pattern: 'Master-detail (40/60 o 50/50)',
+                    behavior: 'List + Detail side by side',
+                    responsive: 'Stack en mobile',
                     useFor: ['email', 'messaging', 'file_browser']
                 }
             }
-        },
-        navigationFlow: {
+        };
+    }
+    
+    static defineNavigationFlow(isMobile, isWeb) {
+        return {
             hierarchy: {
                 level_1: {
-                    screens: ['Home', 'Search', 'Create', 'Notifications', 'Profile'],
-                    access: 'Bottom navigation',
-                    maxItems: '5'
+                    screens: ['Home', 'Main categories', 'Primary features'],
+                    access: isMobile ? 'Bottom navigation' : 'Top navigation bar',
+                    maxItems: isMobile ? '5' : '6-8'
                 },
                 level_2: {
-                    screens: ['Detail views', 'Settings sections', 'Filtered views'],
-                    access: 'In-screen navigation',
-                    maxDepth: '2-3 levels'
+                    screens: ['Sub-categories', 'Filtered views', 'Feature details'],
+                    access: isMobile ? 'In-screen navigation' : 'Dropdown menus o sidebar',
+                    maxDepth: '2-3 levels recommended'
                 },
                 level_3: {
-                    screens: ['Edit forms', 'Deep detail', 'Modals'],
-                    access: 'Direct links from level 2'
+                    screens: ['Item details', 'Edit forms', 'Specific content'],
+                    access: 'Direct links from level 2',
+                    backBehavior: 'Return to previous level'
+                }
+            },
+            patterns: {
+                stack_navigation: {
+                    platform: 'Mobile primary',
+                    behavior: 'Push/Pop screen stack',
+                    animation: 'Slide from right',
+                    backButton: 'Always visible in header'
+                },
+                tab_navigation: {
+                    platform: 'Both',
+                    behavior: 'Switch between parallel sections',
+                    persistence: 'Maintain state per tab',
+                    indication: 'Active tab highlighted'
+                },
+                modal_navigation: {
+                    platform: 'Both',
+                    behavior: 'Temporary overlay',
+                    dismiss: 'X button, backdrop click, swipe down (mobile)',
+                    useCase: 'Forms, confirmations, quick actions'
                 }
             }
-        },
-        consistencyRules: {
+        };
+    }
+    
+    static defineConsistencyRules(isMobile, isWeb) {
+        return {
             spacing: {
                 rule: 'Sistema de espaciado consistente (8px base)',
                 scale: '4px, 8px, 12px, 16px, 24px, 32px, 48px, 64px',
-                application: 'Margins, paddings, gaps'
+                application: 'Margins, paddings, gaps',
+                exception: 'Ajustes finos de 1-2px para alineación visual'
             },
             typography: {
                 rule: 'Jerarquía tipográfica consistente',
                 levels: {
-                    h1: 'Títulos principales de página (24-32px)',
-                    h2: 'Secciones principales (20-24px)',
-                    h3: 'Subsecciones (18-20px)',
-                    body: 'Contenido regular (14-16px)',
-                    caption: 'Texto secundario (12-14px)'
+                    h1: 'Títulos principales de página',
+                    h2: 'Secciones principales',
+                    h3: 'Subsecciones',
+                    body: 'Contenido regular',
+                    caption: 'Texto secundario, metadatos'
                 },
                 consistency: 'Mismo nivel = mismo tamaño en toda la app'
             },
@@ -6810,38 +8325,494 @@ function generateArchitecture(name, category) {
                 rule: 'Uso semántico consistente',
                 mapping: {
                     primary: 'CTAs principales, links, elementos interactivos',
-                    secondary: 'Acciones secundarias, estados hover',
+                    secondary: 'Acciones secundarias',
                     success: 'Confirmaciones, estados positivos',
                     error: 'Errores, alertas, acciones destructivas',
-                    warning: 'Advertencias, estados pendientes',
-                    info: 'Información neutral, tooltips'
+                    warning: 'Advertencias, estados de atención',
+                    info: 'Información neutral, tips'
                 }
             },
             components: {
-                rule: 'Componentes reutilizables y consistentes',
-                principle: 'Un componente, un propósito, múltiples contextos',
-                example: 'Button: mismo estilo en toda la app',
-                variants: 'Primary, Secondary, Ghost, Danger'
-            },
-            states: {
-                rule: 'Estados visuales consistentes',
-                required: ['default', 'hover', 'active', 'focus', 'disabled'],
-                loading: 'Skeleton o spinner consistente',
-                error: 'Borde rojo + mensaje descriptivo'
+                rule: 'Componentes reutilizables con variantes',
+                principle: 'Misma función = mismo componente en toda la app',
+                example: 'Todos los botones primarios usan el mismo estilo',
+                variants: 'size (sm, md, lg), state (default, hover, active, disabled)'
             },
             animations: {
-                rule: 'Animaciones sutiles y consistentes',
+                rule: 'Transiciones consistentes',
                 duration: {
-                    micro: '100-150ms (hover, toggle)',
-                    short: '200-300ms (modals, transitions)',
-                    medium: '300-500ms (page transitions)',
-                    long: '500ms+ (complex animations)'
+                    instant: '<100ms (feedback inmediato)',
+                    quick: '100-200ms (micro-interactions)',
+                    normal: '200-300ms (transiciones estándar)',
+                    slow: '300-500ms (animaciones complejas)'
                 },
-                easing: 'ease-out para entradas, ease-in para salidas',
-                principle: 'Las animaciones deben guiar, no distraer'
+                easing: 'ease-out para entrada, ease-in para salida',
+                principle: 'Misma acción = misma animación'
+            },
+            states: {
+                rule: 'Estados visuales consistentes para elementos interactivos',
+                required: ['default', 'hover', 'active/pressed', 'focused', 'disabled'],
+                loading: 'Skeleton o spinner según contexto',
+                error: 'Mensajes claros con acciones de recuperación'
             }
+        };
+    }
+    
+    static enrichScreenData(screen, screenIndex, totalScreens, architecture) {
+        const screenType = this.determineScreenType(screen.screen);
+        const globalElements = this.getApplicableGlobalElements(screenType, architecture.globalElements);
+        const layoutPattern = this.suggestLayoutPattern(screen, architecture.layoutPatterns);
+        
+        return {
+            ...screen,
+            position: `${screenIndex + 1}/${totalScreens}`,
+            screenType: screenType,
+            navigation: {
+                level: this.determineNavigationLevel(screenIndex),
+                accessFrom: this.determineAccessPoint(screen.screen, screenIndex),
+                backBehavior: screenIndex > 0 ? 'Return to previous screen' : 'N/A'
+            },
+            layout: {
+                pattern: layoutPattern.pattern,
+                recommendation: layoutPattern.recommendation,
+                responsiveBehavior: layoutPattern.responsive
+            },
+            globalElements: {
+                header: globalElements.header,
+                footer: globalElements.footer,
+                bottomNav: globalElements.bottomNav,
+                sidebar: globalElements.sidebar,
+                note: globalElements.note
+            },
+            interactions: this.defineInteractions(screen),
+            stateManagement: this.defineStateManagement(screen),
+            accessibilityNotes: this.generateA11yNotes(screen)
+        };
+    }
+    
+    static determineScreenType(screenName) {
+        const name = screenName.toLowerCase();
+        if (name.includes('splash') || name.includes('loading')) return 'fullscreen';
+        if (name.includes('onboarding')) return 'fullscreen';
+        if (name.includes('login') || name.includes('registro') || name.includes('auth')) return 'authScreens';
+        if (name.includes('home') || name.includes('dashboard') || name.includes('feed')) return 'mainScreens';
+        if (name.includes('detalle') || name.includes('detail') || name.includes('view') || name.includes('perfil')) return 'detailScreens';
+        if (name.includes('crear') || name.includes('editar') || name.includes('settings') || name.includes('config')) return 'formScreens';
+        return 'mainScreens';
+    }
+    
+    static getApplicableGlobalElements(screenType, globalElements) {
+        const excluded = {
+            fullscreen: ['header', 'footer', 'bottomNav', 'sidebar'],
+            authScreens: ['bottomNav', 'sidebar'],
+            mainScreens: [],
+            detailScreens: ['sidebar'],
+            formScreens: ['sidebar']
+        };
+        
+        const excludeList = excluded[screenType] || [];
+        
+        return {
+            header: !excludeList.includes('header') ? globalElements.persistent.header : null,
+            footer: !excludeList.includes('footer') ? globalElements.persistent.footer : null,
+            bottomNav: !excludeList.includes('bottomNav') ? globalElements.persistent.bottomNav : null,
+            sidebar: !excludeList.includes('sidebar') ? globalElements.persistent.sidebar : null,
+            note: excludeList.length > 0 ? `Excluye: ${excludeList.join(', ')}` : 'Todos los elementos globales aplicables'
+        };
+    }
+    
+    static determineNavigationLevel(index) {
+        if (index <= 3) return 'Level 1 (Primary)';
+        if (index <= 7) return 'Level 2 (Secondary)';
+        return 'Level 3 (Detail)';
+    }
+    
+    static determineAccessPoint(screenName, index) {
+        const name = screenName.toLowerCase();
+        if (index === 0) return 'App launch / Deep link';
+        if (index === 1) return 'First-time user flow';
+        if (name.includes('home') || name.includes('dashboard')) return 'Bottom navigation / Main menu';
+        if (name.includes('perfil') || name.includes('profile')) return 'Bottom navigation / User menu';
+        if (name.includes('búsqueda') || name.includes('search')) return 'Bottom navigation / Search icon';
+        if (name.includes('notif')) return 'Notification icon / Push notification';
+        return 'Navigation from previous screen / Deep link';
+    }
+    
+    static suggestLayoutPattern(screen, layoutPatterns) {
+        const name = screen.screen.toLowerCase();
+        const desc = screen.description.toLowerCase();
+        
+        if (name.includes('dashboard') || name.includes('home')) {
+            return {
+                pattern: 'Mixed layout',
+                recommendation: 'Hero section + Grid/List de cards',
+                responsive: 'Stack vertically en mobile'
+            };
+        }
+        
+        if (name.includes('lista') || name.includes('feed') || desc.includes('lista')) {
+            return {
+                pattern: 'Vertical list',
+                recommendation: 'Single column con infinite scroll o pagination',
+                responsive: 'Mantener single column'
+            };
+        }
+        
+        if (name.includes('detalle') || name.includes('detail')) {
+            return {
+                pattern: 'Single column detail',
+                recommendation: 'Hero image/media + Content sections + Related items',
+                responsive: 'Sticky header en scroll'
+            };
+        }
+        
+        if (name.includes('settings') || name.includes('config')) {
+            return {
+                pattern: 'Grouped list',
+                recommendation: 'Sections con headers + List items',
+                responsive: 'Collapsible sections en mobile'
+            };
+        }
+        
+        return {
+            pattern: 'Flexible layout',
+            recommendation: 'Adaptar según contenido específico',
+            responsive: 'Mobile-first approach'
+        };
+    }
+    
+    static defineInteractions(screen) {
+        const interactions = [];
+        
+        screen.elements.forEach(element => {
+            const el = element.toLowerCase();
+            if (el.includes('button') || el.includes('cta') || el.includes('btn')) {
+                interactions.push(`Tap/Click en ${element} -> Acción específica`);
+            }
+            if (el.includes('card')) {
+                interactions.push(`Tap en ${element} -> Navegar a detalle`);
+            }
+            if (el.includes('search') || el.includes('búsqueda')) {
+                interactions.push(`Focus en ${element} -> Mostrar teclado y sugerencias`);
+            }
+            if (el.includes('scroll')) {
+                interactions.push(`Scroll -> Cargar más contenido (infinite scroll o pagination)`);
+            }
+        });
+        
+        return interactions.length > 0 ? interactions : ['Interactions basadas en elementos de la pantalla'];
+    }
+    
+    static defineStateManagement(screen) {
+        return {
+            initialState: 'Loading -> Mostrar skeleton/spinner',
+            successState: 'Contenido cargado y visible',
+            errorState: 'Mensaje de error + Retry button',
+            emptyState: 'Ilustración + Mensaje + CTA cuando no hay contenido',
+            offlineState: screen.screen.includes('Splash') ? 'N/A' : 'Cached content o mensaje de sin conexión'
+        };
+    }
+    
+    static generateA11yNotes(screen) {
+        return [
+            'Todos los elementos interactivos deben ser accesibles por teclado',
+            'Labels descriptivos en todos los inputs y botones',
+            'Contraste mínimo 4.5:1 para texto normal, 3:1 para texto grande',
+            'Anuncios de screen reader para cambios dinámicos',
+            'Enfoque visible en navegación por teclado',
+            'Tamaño mínimo de touch target: 44x44px (mobile)'
+        ];
+    }
+}
+
+// ====================
+// DYNAMIC SCREEN NAMES
+// ====================
+function generateDynamicScreenNames(name, category) {
+    const screenConfigs = {
+        fintech: {
+            home: 'Dashboard Financiero',
+            search: 'Buscar Transacciones',
+            detail: 'Detalle de Transacción',
+            feed: 'Actividad Financiera',
+            feedDescription: 'Flujo de movimientos',
+            saved: 'Transacciones Guardadas',
+            activity: 'Historial Financiero',
+            activityType: 'transacciones',
+            create: 'Nueva Transacción',
+            createAction: 'crear transacciones',
+            messaging: 'Asesor Financiero Chat',
+            analytics: 'Analytics Financiero',
+            analyticsType: 'finanzas',
+            social: 'Comunidad Financiera',
+            library: 'Mi Cartera',
+            calendar: 'Calendario de Pagos',
+            calendarType: 'pagos y vencimientos',
+            admin: 'Panel Administrativo',
+            adminType: 'control financiero',
+            contentType: 'transacciones'
+        },
+        healthtech: {
+            home: 'Dashboard de Salud',
+            search: 'Buscar Profesionales',
+            detail: 'Perfil de Doctor',
+            feed: 'Feed de Salud',
+            feedDescription: 'Actualizaciones de bienestar',
+            saved: 'Consultas Guardadas',
+            activity: 'Historial Médico',
+            activityType: 'consultas',
+            create: 'Agendar Cita',
+            createAction: 'agendar citas',
+            messaging: 'Chat Médico',
+            analytics: 'Análisis de Salud',
+            analyticsType: 'salud',
+            social: 'Comunidad de Bienestar',
+            library: 'Mis Registros Médicos',
+            calendar: 'Calendario de Citas',
+            calendarType: 'citas y tratamientos',
+            admin: 'Panel Clínico',
+            adminType: 'gestión médica',
+            contentType: 'consultas'
+        },
+        edtech: {
+            home: 'Mi Aprendizaje',
+            search: 'Buscar Cursos',
+            detail: 'Detalle del Curso',
+            feed: 'Feed Educativo',
+            feedDescription: 'Contenido de aprendizaje',
+            saved: 'Cursos Guardados',
+            activity: 'Progreso de Aprendizaje',
+            activityType: 'estudio',
+            create: 'Crear Curso',
+            createAction: 'crear contenido educativo',
+            messaging: 'Chat con Instructor',
+            analytics: 'Progreso Académico',
+            analyticsType: 'aprendizaje',
+            social: 'Comunidad de Estudiantes',
+            library: 'Mi Biblioteca',
+            calendar: 'Calendario de Clases',
+            calendarType: 'clases y exámenes',
+            admin: 'Panel Educativo',
+            adminType: 'gestión académica',
+            contentType: 'cursos'
+        },
+        ecommerce: {
+            home: 'Tienda Principal',
+            search: 'Buscar Productos',
+            detail: 'Detalle del Producto',
+            feed: 'Novedades',
+            feedDescription: 'Productos destacados',
+            saved: 'Lista de Deseos',
+            activity: 'Historial de Compras',
+            activityType: 'compras',
+            create: 'Vender Producto',
+            createAction: 'publicar productos',
+            messaging: 'Chat con Vendedor',
+            analytics: 'Mis Compras',
+            analyticsType: 'compras',
+            social: 'Comunidad de Compradores',
+            library: 'Mis Pedidos',
+            calendar: 'Calendario de Entregas',
+            calendarType: 'entregas y devoluciones',
+            admin: 'Panel de Ventas',
+            adminType: 'gestión de tienda',
+            contentType: 'productos'
+        },
+        social: {
+            home: 'Feed Principal',
+            search: 'Buscar Usuarios',
+            detail: 'Perfil de Usuario',
+            feed: 'Timeline',
+            feedDescription: 'Publicaciones recientes',
+            saved: 'Posts Guardados',
+            activity: 'Tu Actividad',
+            activityType: 'interacciones',
+            create: 'Crear Post',
+            createAction: 'publicar contenido',
+            messaging: 'Mensajes Directos',
+            analytics: 'Insights de Perfil',
+            analyticsType: 'engagement',
+            social: 'Red Social',
+            library: 'Tus Publicaciones',
+            calendar: 'Eventos',
+            calendarType: 'eventos sociales',
+            admin: 'Panel de Moderación',
+            adminType: 'moderación de contenido',
+            contentType: 'publicaciones'
+        },
+        productivity: {
+            home: 'Workspace',
+            search: 'Buscar Tareas',
+            detail: 'Detalle de Tarea',
+            feed: 'Actividad del Equipo',
+            feedDescription: 'Actualizaciones de trabajo',
+            saved: 'Tareas Importantes',
+            activity: 'Historial de Trabajo',
+            activityType: 'tareas',
+            create: 'Nueva Tarea',
+            createAction: 'crear tareas',
+            messaging: 'Chat del Equipo',
+            analytics: 'Productividad',
+            analyticsType: 'rendimiento',
+            social: 'Equipo',
+            library: 'Proyectos',
+            calendar: 'Calendario de Tareas',
+            calendarType: 'deadlines y reuniones',
+            admin: 'Panel de Gestión',
+            adminType: 'gestión de equipo',
+            contentType: 'tareas'
+        },
+        entertainment: {
+            home: 'Inicio',
+            search: 'Buscar Contenido',
+            detail: 'Detalle de Contenido',
+            feed: 'Para Ti',
+            feedDescription: 'Contenido recomendado',
+            saved: 'Mi Lista',
+            activity: 'Historial de Reproducción',
+            activityType: 'visualización',
+            create: 'Subir Contenido',
+            createAction: 'subir videos',
+            messaging: 'Chat con Creadores',
+            analytics: 'Estadísticas de Visualización',
+            analyticsType: 'consumo',
+            social: 'Comunidad',
+            library: 'Mi Biblioteca',
+            calendar: 'Próximos Estrenos',
+            calendarType: 'estrenos y eventos',
+            admin: 'Panel de Creadores',
+            adminType: 'gestión de contenido',
+            contentType: 'videos'
+        },
+        travel: {
+            home: 'Explorar Destinos',
+            search: 'Buscar Viajes',
+            detail: 'Detalle del Destino',
+            feed: 'Inspiración de Viajes',
+            feedDescription: 'Destinos destacados',
+            saved: 'Viajes Guardados',
+            activity: 'Mis Viajes',
+            activityType: 'reservas',
+            create: 'Planear Viaje',
+            createAction: 'planear itinerarios',
+            messaging: 'Chat con Guías',
+            analytics: 'Historial de Viajes',
+            analyticsType: 'viajes',
+            social: 'Comunidad Viajera',
+            library: 'Mis Reservas',
+            calendar: 'Calendario de Viajes',
+            calendarType: 'vuelos y reservas',
+            admin: 'Panel de Reservas',
+            adminType: 'gestión de bookings',
+            contentType: 'destinos'
+        },
+        food: {
+            home: 'Explorar Restaurantes',
+            search: 'Buscar Comida',
+            detail: 'Menú del Restaurante',
+            feed: 'Destacados',
+            feedDescription: 'Platos populares',
+            saved: 'Favoritos',
+            activity: 'Mis Pedidos',
+            activityType: 'pedidos',
+            create: 'Nuevo Pedido',
+            createAction: 'realizar pedidos',
+            messaging: 'Chat con Restaurante',
+            analytics: 'Historial de Pedidos',
+            analyticsType: 'consumo',
+            social: 'Comunidad Foodie',
+            library: 'Mis Direcciones',
+            calendar: 'Reservas',
+            calendarType: 'reservas y entregas',
+            admin: 'Panel de Restaurante',
+            adminType: 'gestión de pedidos',
+            contentType: 'restaurantes'
+        },
+        other: {
+            home: 'Dashboard Principal',
+            search: 'Buscar',
+            detail: 'Vista Detallada',
+            feed: 'Feed de Contenido',
+            feedDescription: 'Actualizaciones',
+            saved: 'Guardados',
+            activity: 'Actividad Reciente',
+            activityType: 'acciones',
+            create: 'Crear Nuevo',
+            createAction: 'crear contenido',
+            messaging: 'Mensajería',
+            analytics: 'Analytics',
+            analyticsType: 'uso',
+            social: 'Comunidad',
+            library: 'Mi Colección',
+            calendar: 'Calendario',
+            calendarType: 'eventos',
+            admin: 'Panel Administrativo',
+            adminType: 'administración',
+            contentType: 'items'
         }
     };
+
+    return screenConfigs[category] || screenConfigs.other;
+}
+
+// ====================
+// GENERATE FLOWS (COMPLETE VERSION)
+// ====================
+function generateFlows(name, category, appType = '') {
+    // Analizar arquitectura basada en tipo de app Y nombre del proyecto
+    const architecture = ScreenArchitecture.analyzeScreenStructure(appType, category, name);
+    
+    // Generar nombres dinámicos según categoría
+    const dynamicScreens = generateDynamicScreenNames(name, category);
+    
+    const baseFlows = {
+        mvp: [
+            { screen: 'Splash / Loading', description: `Pantalla inicial con logo de ${name} y carga de recursos`, elements: ['Logo animado', 'Progress indicator', 'Versión de app'], context: 'Primera impresión - Sin navegación visible' },
+            { screen: 'Onboarding', description: `Introducción al valor de ${name} en 3-4 slides`, elements: ['Ilustraciones', 'Títulos impactantes', 'Dots de progreso', 'Skip button', 'CTA final'], context: 'Educación inicial - Usuario puede saltarlo' },
+            { screen: 'Login / Registro', description: 'Autenticación de usuarios', elements: ['Email input', 'Password input', 'Social login buttons', 'Forgot password link', 'Términos y condiciones'], context: 'Autenticación - Sin navegación principal' },
+            { screen: dynamicScreens.home, description: `Vista principal de ${name}`, elements: ['Header con perfil', 'Cards de contenido', 'Quick actions', 'Bottom navigation'], context: 'Pantalla principal - Navegación completa disponible' },
+            { screen: 'Perfil de Usuario', description: 'Configuración y datos del usuario', elements: ['Avatar', 'Datos personales', 'Preferencias', 'Logout button'], context: 'Gestión de cuenta - Accesible desde navegación principal' }
+        ],
+        intermediate: [
+            { screen: dynamicScreens.search, description: `Sistema de búsqueda de ${dynamicScreens.contentType}`, elements: ['Search bar', 'Filtros básicos', 'Resultados en lista/grid', 'Historial reciente'], context: 'Discovery - Encontrar contenido' },
+            { screen: dynamicScreens.detail, description: `Vista detallada de ${dynamicScreens.contentType}`, elements: ['Hero image', 'Información completa', 'Actions principales', 'Contenido relacionado'], context: 'Información detallada - Enfoque en un elemento' },
+            { screen: dynamicScreens.feed, description: `${dynamicScreens.feedDescription} de ${name}`, elements: ['Posts/Items en scroll', 'Refresh pull', 'Filtros de contenido', 'Infinite scroll'], context: 'Consumo de contenido - Actualización continua' },
+            { screen: 'Notificaciones', description: 'Centro de notificaciones', elements: ['Lista de notificaciones', 'Filtros por tipo', 'Mark as read', 'Settings rápidos'], context: 'Centro de actividad - Gestión de notificaciones' },
+            { screen: 'Configuración', description: 'Ajustes y preferencias', elements: ['Sections organizadas', 'Preferencias de app', 'Notificaciones', 'Privacidad', 'Cuenta'], context: 'Personalización - Ajustes del usuario' },
+            { screen: dynamicScreens.saved, description: `${dynamicScreens.contentType} guardados`, elements: ['Lista de guardados', 'Organización por categorías', 'Quick access', 'Opciones de compartir'], context: 'Contenido curado - Acceso rápido' },
+            { screen: dynamicScreens.activity, description: `Historial de ${dynamicScreens.activityType}`, elements: ['Timeline de actividad', 'Filtros temporales', 'Estadísticas básicas', 'Clear history'], context: 'Seguimiento - Registro de acciones' },
+            { screen: 'Ayuda / FAQ', description: 'Centro de soporte básico', elements: ['Preguntas frecuentes', 'Search en FAQs', 'Contact support', 'Video tutoriales'], context: 'Soporte - Ayuda al usuario' }
+        ],
+        complete: [
+            { screen: `${dynamicScreens.search} Avanzada`, description: `Motor de búsqueda completo de ${dynamicScreens.contentType} con IA`, elements: ['Search bar con NLP', 'Filtros avanzados', 'Voice search', 'Visual search', 'Saved searches', 'Recommendations'], context: 'Discovery avanzado - Búsqueda inteligente' },
+            { screen: `${dynamicScreens.detail} Detallada`, description: `Información completa de ${dynamicScreens.contentType} con interacciones`, elements: ['Hero media 360°', 'AR preview', 'Reviews verificados', 'Comparador', 'Share suite', 'Related content'], context: 'Detalle inmersivo - Experiencia completa' },
+            { screen: dynamicScreens.create, description: `Herramientas para ${dynamicScreens.createAction}`, elements: ['Form builder', 'Media upload', 'Rich text editor', 'Preview', 'Autosave', 'Publish/Draft', 'Collaborate'], context: 'Creación - Herramientas profesionales' },
+            { screen: dynamicScreens.messaging, description: 'Sistema de mensajería en tiempo real', elements: ['Lista de conversaciones', 'Chat interface', 'Media sharing', 'Reactions', 'Read receipts', 'Group chats', 'Search'], context: 'Comunicación - Mensajería directa' },
+            { screen: 'Centro de Notificaciones Pro', description: 'Gestión inteligente de notificaciones', elements: ['Smart grouping', 'Scheduled digest', 'Channel preferences', 'Snooze', 'Priority inbox', 'Actions rápidas'], context: 'Notificaciones avanzadas - Control total' },
+            { screen: dynamicScreens.analytics, description: `Métricas y estadísticas de ${dynamicScreens.analyticsType}`, elements: ['Usage dashboard', 'Goal tracking', 'Charts interactivos', 'Comparativas', 'Reports exportables', 'Insights AI'], context: 'Analytics - Métricas y tendencias' },
+            { screen: dynamicScreens.social, description: 'Centro de interacciones sociales', elements: ['Following/Followers', 'Activity feed', 'Grupos', 'Events', 'Sharing', 'Mentions', 'Trending'], context: 'Social - Conexión con comunidad' },
+            { screen: 'Configuración Avanzada', description: 'Panel de control completo', elements: ['Settings sections', 'Privacy center', 'Integrations', 'API keys', 'Export data', 'Account health', 'Theme customizer'], context: 'Control avanzado - Configuración total' },
+            { screen: dynamicScreens.library, description: `Organización de ${dynamicScreens.contentType}`, elements: ['Collections', 'Tags', 'Folders', 'Sort/Filter options', 'Bulk actions', 'Search in library'], context: 'Organización - Gestión de contenido' },
+            { screen: dynamicScreens.calendar, description: `Gestión de ${dynamicScreens.calendarType}`, elements: ['Calendar view', 'Event creation', 'Reminders', 'Sync options', 'Recurring events', 'Agenda view'], context: 'Planificación - Gestión temporal' },
+            { screen: 'Centro de Ayuda Pro', description: 'Soporte completo multicanal', elements: ['AI chatbot', 'FAQs dinámicas', 'Video tutorials', 'Live chat', 'Ticket system', 'Community forum', 'Knowledge base'], context: 'Soporte premium - Ayuda completa' },
+            { screen: dynamicScreens.admin, description: `Panel de ${dynamicScreens.adminType}`, elements: ['User management', 'Content moderation', 'Analytics dashboard', 'Settings globales', 'Reports', 'Permissions'], context: 'Administración - Control del sistema' },
+            { screen: 'Integraciones / API', description: 'Conexión con servicios externos', elements: ['Connected apps', 'API configuration', 'Webhooks', 'OAuth connections', 'Sync status', 'Logs'], context: 'Conectividad - Integración externa' }
+        ]
+    };
+
+    // Enriquecer cada pantalla con arquitectura
+    Object.keys(baseFlows).forEach(tier => {
+        if (tier !== '_architecture') {
+            baseFlows[tier] = baseFlows[tier].map((screen, index) => 
+                ScreenArchitecture.enrichScreenData(screen, index, baseFlows[tier].length, architecture)
+            );
+        }
+    });
+    
+    // Agregar metadata de arquitectura
+    baseFlows._architecture = architecture;
+
+    return baseFlows;
 }
 
 function generateUIComponents(category) {
@@ -7034,6 +9005,157 @@ function generateProject() {
     }, 1500);
 }
 
+// ====================
+// ALIGNMENT PANEL RENDER
+// ====================
+function renderAlignmentPanel(analysis, userInput) {
+    if (!analysis) return '';
+    
+    const scoreInfo = AlignmentAnalyzer.getScoreLevel(analysis.score);
+    
+    // Generar HTML de keywords comparados
+    const matchedHTML = analysis.matched.slice(0, 8).map(kw => 
+        `<span style="display: inline-block; padding: 4px 8px; margin: 2px; background: rgba(34, 197, 94, 0.2); color: var(--success); border-radius: 4px; font-size: 0.75rem;">✓ ${kw}</span>`
+    ).join('');
+    
+    const missingHTML = analysis.missing.slice(0, 5).map(kw => 
+        `<span style="display: inline-block; padding: 4px 8px; margin: 2px; background: rgba(239, 68, 68, 0.2); color: var(--error); border-radius: 4px; font-size: 0.75rem;">✕ ${kw}</span>`
+    ).join('');
+    
+    const extraHTML = analysis.extra.slice(0, 5).map(kw => 
+        `<span style="display: inline-block; padding: 4px 8px; margin: 2px; background: rgba(245, 158, 11, 0.2); color: var(--warning); border-radius: 4px; font-size: 0.75rem;">⚠ ${kw}</span>`
+    ).join('');
+    
+    // Generar warnings si hay desviación
+    let warningsHTML = '';
+    const criticalRecommendations = analysis.recommendations.filter(r => r.type === 'critical' || r.type === 'warning');
+    
+    if (criticalRecommendations.length > 0) {
+        warningsHTML = criticalRecommendations.map(rec => `
+            <div style="display: flex; align-items: flex-start; gap: 12px; padding: 12px; background: rgba(239, 68, 68, 0.1); border-radius: var(--radius-sm); margin-bottom: 12px; border-left: 3px solid var(--error);">
+                <span style="font-size: 1.2rem;">⚠️</span>
+                <div>
+                    <div style="font-weight: 600; color: var(--error); margin-bottom: 4px;">Posible Desviación Detectada</div>
+                    <div style="font-size: 0.85rem; color: var(--text-secondary);">${rec.message}</div>
+                </div>
+            </div>
+        `).join('');
+    }
+    
+    // Color del score badge según nivel
+    const scoreBadgeColors = {
+        excellent: 'background: rgba(34, 197, 94, 0.2); color: var(--success);',
+        good: 'background: rgba(34, 197, 94, 0.15); color: var(--success);',
+        fair: 'background: rgba(245, 158, 11, 0.2); color: var(--warning);',
+        poor: 'background: rgba(239, 68, 68, 0.2); color: var(--error);'
+    };
+    
+    return `
+        <div style="padding: 16px; background: var(--bg-tertiary); border-radius: var(--radius-md); margin-bottom: 16px; border: 1px solid var(--border-color);">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="font-size: 1.2rem;">🎯</span>
+                    <span style="font-weight: 600; color: var(--text-primary);">Control de Alineación</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="font-size: 0.8rem; color: var(--text-muted);">Puntuación:</span>
+                    <div style="padding: 6px 12px; border-radius: 20px; font-weight: 600; font-size: 0.85rem; ${scoreBadgeColors[scoreInfo.level]}">
+                        ${scoreInfo.icon} ${analysis.score}% - ${scoreInfo.label}
+                    </div>
+                </div>
+            </div>
+            
+            ${warningsHTML}
+            
+            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 16px;">
+                <div style="padding: 12px; background: var(--bg-secondary); border-radius: var(--radius-sm); text-align: center;">
+                    <div style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 4px;">Cobertura de Conceptos</div>
+                    <div style="font-size: 1.2rem; font-weight: 600; color: var(--accent-primary);">
+                        ${Math.round(analysis.keywordCoverage)}%
+                    </div>
+                    <div style="font-size: 0.7rem; color: var(--text-muted);">
+                        (${analysis.matched.length}/${analysis.inputKeywords.length})
+                    </div>
+                </div>
+                <div style="padding: 12px; background: var(--bg-secondary); border-radius: var(--radius-sm); text-align: center;">
+                    <div style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 4px;">Alineación Categoría</div>
+                    <div style="font-size: 1.2rem; font-weight: 600; color: var(--accent-secondary);">
+                        ${Math.round(analysis.categoryAlignment)}%
+                    </div>
+                    <div style="font-size: 0.7rem; color: var(--text-muted);">
+                        ${userInput?.category || 'N/A'}
+                    </div>
+                </div>
+                <div style="padding: 12px; background: var(--bg-secondary); border-radius: var(--radius-sm); text-align: center;">
+                    <div style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 4px;">Alineación Semántica</div>
+                    <div style="font-size: 1.2rem; font-weight: 600; color: var(--success);">
+                        ${Math.round(analysis.semanticAlignment)}%
+                    </div>
+                    <div style="font-size: 0.7rem; color: var(--text-muted);">
+                        Expansión apropiada
+                    </div>
+                </div>
+            </div>
+            
+            <div style="background: var(--bg-secondary); padding: 12px; border-radius: var(--radius-sm);">
+                <div style="margin-bottom: 12px;">
+                    <div style="font-size: 0.8rem; font-weight: 500; color: var(--success); margin-bottom: 8px;">✓ Conceptos Encontrados (${analysis.matched.length})</div>
+                    <div>${matchedHTML || '<span style="color: var(--text-muted); font-size: 0.8rem;">Ninguno</span>'}</div>
+                </div>
+                ${analysis.missing.length > 0 ? `
+                <div style="margin-bottom: 12px;">
+                    <div style="font-size: 0.8rem; font-weight: 500; color: var(--error); margin-bottom: 8px;">✕ Conceptos Faltantes (${analysis.missing.length})</div>
+                    <div>
+                        ${missingHTML}
+                        ${analysis.missing.length > 5 ? `<span style="color: var(--text-muted); font-size: 0.75rem; margin-left: 8px;">+${analysis.missing.length - 5} más</span>` : ''}
+                    </div>
+                </div>
+                ` : ''}
+                ${analysis.extra.length > 0 ? `
+                <div>
+                    <div style="font-size: 0.8rem; font-weight: 500; color: var(--warning); margin-bottom: 8px;">⚠ Conceptos Adicionales (${analysis.extra.length})</div>
+                    <div>
+                        ${extraHTML}
+                        ${analysis.extra.length > 5 ? `<span style="color: var(--text-muted); font-size: 0.75rem; margin-left: 8px;">+${analysis.extra.length - 5} más</span>` : ''}
+                    </div>
+                </div>
+                ` : ''}
+            </div>
+            
+            ${analysis.score < 60 ? `
+            <div style="margin-top: 16px; padding: 12px; background: rgba(239, 68, 68, 0.1); border-radius: var(--radius-sm); border: 1px dashed var(--error);">
+                <p style="color: var(--error); font-size: 0.85rem; margin: 0;">
+                    <strong>⚠️ Alerta de Desviación:</strong> El contenido generado se ha desviado significativamente de tu descripción original. 
+                    Considera regenerar el proyecto o ajustar manualmente las secciones afectadas.
+                </p>
+            </div>
+            ` : ''}
+            
+            ${analysis.score < 80 ? `
+            <div style="display: flex; gap: 10px; margin-top: 16px; flex-wrap: wrap;">
+                ${analysis.score < 70 ? `
+                <button onclick="regenerateWithFocus()" style="flex: 1; min-width: 140px; padding: 10px 16px; background: var(--accent-primary); color: white; border: none; border-radius: var(--radius-sm); cursor: pointer; font-size: 0.85rem; font-weight: 500; display: flex; align-items: center; justify-content: center; gap: 6px;">
+                    ↻ Regenerar con Más Foco
+                </button>
+                ` : ''}
+                <button onclick="adjustGeneration()" style="flex: 1; min-width: 140px; padding: 10px 16px; background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: var(--radius-sm); cursor: pointer; font-size: 0.85rem; font-weight: 500; display: flex; align-items: center; justify-content: center; gap: 6px;">
+                    🎯 Ajustar Manualmente
+                </button>
+                <button onclick="showAlignmentDetails()" style="flex: 1; min-width: 140px; padding: 10px 16px; background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: var(--radius-sm); cursor: pointer; font-size: 0.85rem; font-weight: 500; display: flex; align-items: center; justify-content: center; gap: 6px;">
+                    🔍 Ver Detalles
+                </button>
+            </div>
+            ` : `
+            <div style="margin-top: 16px; padding: 12px; background: rgba(34, 197, 94, 0.1); border-radius: var(--radius-sm); border: 1px solid var(--success);">
+                <p style="color: var(--success); font-size: 0.85rem; margin: 0;">
+                    ✅ <strong>Excelente alineación.</strong> El contenido generado refleja fielmente tu descripción original.
+                </p>
+            </div>
+            `}
+        </div>
+    `;
+}
+
 function populateOverview(project) {
     const overviewContent = document.getElementById('overviewContent');
     if (!overviewContent) return;
@@ -7046,11 +9168,30 @@ function populateOverview(project) {
         return div.innerHTML;
     };
     
+    // Analizar alineación si existe input original y el proyecto no ha sido aprobado
+    let alignmentHTML = '';
+    if (project.data && project.data.whatIs && !project.overviewApproved) {
+        // Crear userInput para análisis
+        const userInput = {
+            name: project.name,
+            category: project.category,
+            description: project.description,
+            expandedDescription: project.expandedDescription || project.description
+        };
+        
+        try {
+            const analysis = AlignmentAnalyzer.analyze(userInput, project.data);
+            alignmentHTML = renderAlignmentPanel(analysis, userInput);
+        } catch (e) {
+            console.warn('Error analyzing alignment:', e);
+        }
+    }
+    
     // Información de descripción expandida si existe
     const expandedDescInfo = project.expandedDescription ? `
         <div style="margin-top: 16px;">
             <strong style="color: var(--accent-primary); display: block; margin-bottom: 8px;">✨ Descripción Expandida:</strong>
-            <div style="color: var(--text-secondary); font-style: italic; padding: 12px; background: var(--bg-tertiary); border-radius: var(--radius-sm); line-height: 1.6; white-space: pre-wrap; max-height: 200px; overflow-y: auto;">${escapeHtml(project.expandedDescription)}</div>
+            <div style="color: var(--text-secondary); font-style: italic; padding: 12px; background: var(--bg-tertiary); border-radius: var(--radius-sm); line-height: 1.6; white-space: pre-wrap;">${escapeHtml(project.expandedDescription)}</div>
         </div>
     ` : '';
     
@@ -7060,13 +9201,13 @@ function populateOverview(project) {
             <div class="content-block-header">
                 <span class="content-block-title">🎯 Resultado Generado</span>
             </div>
-            <div class="content-block-body" style="padding: 16px; max-height: 300px; overflow-y: auto;">
+            <div class="content-block-body" style="padding: 16px;">
                 <strong style="color: var(--accent-primary); display: block; margin-bottom: 8px;">¿Qué es?</strong>
                 <p style="color: var(--text-secondary); font-size: 0.9rem; line-height: 1.6; white-space: pre-wrap;">${escapeHtml(project.data.whatIs)}</p>
                 ${project.data.targetAudience ? `
                 <strong style="color: var(--accent-primary); display: block; margin-top: 16px; margin-bottom: 8px;">¿Para quién?</strong>
-                <p style="color: var(--text-secondary); font-size: 0.9rem; line-height: 1.6; white-space: pre-wrap;">${escapeHtml(project.data.targetAudience.substring(0, 300))}...</p>
-                ` : ''}
+                <p style="color: var(--text-secondary); font-size: 0.9rem; line-height: 1.6; white-space: pre-wrap;">${escapeHtml(project.data.targetAudience)}</p>
+                ` : ''}}
             </div>
         </div>
     ` : `
@@ -7102,6 +9243,9 @@ function populateOverview(project) {
     
     overviewContent.innerHTML = `
         <div style="display: grid; gap: 20px;">
+            <!-- Panel de Alineación (solo si hay datos generados y no está aprobado) -->
+            ${alignmentHTML}
+            
             <!-- Información del Proyecto -->
             <div class="content-block" style="margin: 0;">
                 <div class="content-block-header">
@@ -7214,6 +9358,10 @@ function populateProjectFields(data) {
         const element = document.getElementById(id);
         if (element && value) {
             element.value = value;
+            // Auto-resize textarea después de poblar
+            if (element.tagName === 'TEXTAREA') {
+                autoResizeTextarea(element);
+            }
         }
     });
     
@@ -7253,6 +9401,13 @@ function populateProjectFields(data) {
     
     // Update prompt builder
     updatePromptOutput();
+    
+    // Auto-resize all textareas after content is loaded
+    setTimeout(() => {
+        document.querySelectorAll('textarea').forEach(textarea => {
+            autoResizeTextarea(textarea);
+        });
+    }, 100);
 }
 
 function renderFlows(flows) {
@@ -7277,18 +9432,233 @@ function renderFlows(flows) {
                             <span style="font-weight: 600; color: var(--text-primary); font-size: 1.1rem;">${flow.screen}</span>
                         </div>
                         <div class="flow-card-subtitle" style="color: var(--text-secondary); margin-top: 8px; font-size: 0.9rem; line-height: 1.5;">${flow.description}</div>
+                        ${flow.context ? `<div style="font-size: 0.7rem; color: var(--text-muted); margin-top: 4px; font-style: italic;">${flow.context}</div>` : ''}
                     </div>
                     <div class="flow-card-body">
-                        <strong style="font-size: 0.8rem; color: var(--accent-primary); display: block; margin-bottom: 10px;">🎨 Elementos UI:</strong>
-                        <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+                        <strong style="font-size: 0.75rem; color: var(--accent-primary); display: block; margin-bottom: 8px;">🎨 Elementos UI:</strong>
+                        <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px;">
                             ${flow.elements.map(el => `
                                 <span style="padding: 6px 12px; background: var(--bg-secondary); border-radius: 20px; font-size: 0.75rem; color: var(--text-muted);">• ${el}</span>
                             `).join('')}
                         </div>
+                        
+                        ${flow.globalElements ? `
+                        <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-color);">
+                            <strong style="font-size: 0.75rem; color: var(--info); display: block; margin-bottom: 6px;">🏗️ Elementos Globales:</strong>
+                            <div style="font-size: 0.75rem; color: var(--text-secondary); line-height: 1.5;">
+                                ${flow.globalElements.header ? '✓ Header' : '✗ Header'} | 
+                                ${flow.globalElements.bottomNav ? '✓ Bottom Nav' : '✗ Bottom Nav'} | 
+                                ${flow.globalElements.sidebar ? '✓ Sidebar' : '✗ Sidebar'}
+                                ${flow.globalElements.note ? `<br><span style="font-style: italic; color: var(--text-muted);">${flow.globalElements.note}</span>` : ''}
+                            </div>
+                        </div>
+                        ` : ''}
+                        
+                        ${flow.layout ? `
+                        <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-color);">
+                            <strong style="font-size: 0.75rem; color: var(--warning); display: block; margin-bottom: 6px;">📐 Layout:</strong>
+                            <div style="font-size: 0.75rem; color: var(--text-secondary); line-height: 1.5;">
+                                ${flow.layout.pattern}<br>
+                                <span style="font-style: italic; color: var(--text-muted);">${flow.layout.recommendation}</span>
+                            </div>
+                        </div>
+                        ` : ''}
+                        
+                        ${flow.navigation ? `
+                        <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-color);">
+                            <strong style="font-size: 0.75rem; color: var(--success); display: block; margin-bottom: 6px;">🧭 Navegación:</strong>
+                            <div style="font-size: 0.75rem; color: var(--text-secondary); line-height: 1.5;">
+                                Nivel: ${flow.navigation.level}<br>
+                                Acceso: ${flow.navigation.accessFrom}
+                            </div>
+                        </div>
+                        ` : ''}
+                        
+                        ${flow.interactions && flow.interactions.length > 0 ? `
+                        <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-color);">
+                            <strong style="font-size: 0.75rem; color: var(--accent-secondary); display: block; margin-bottom: 6px;">👆 Interacciones:</strong>
+                            <div style="font-size: 0.75rem; color: var(--text-secondary); line-height: 1.5;">
+                                ${flow.interactions.map(i => `• ${i}`).join('<br>')}
+                            </div>
+                        </div>
+                        ` : ''}
+                        
+                        ${flow.stateManagement ? `
+                        <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-color);">
+                            <strong style="font-size: 0.75rem; color: #9b59b6; display: block; margin-bottom: 6px;">📊 Estado:</strong>
+                            <div style="font-size: 0.75rem; color: var(--text-secondary); line-height: 1.5;">
+                                Loading: ${flow.stateManagement.loading ? '✓' : '✗'} | 
+                                Empty: ${flow.stateManagement.empty ? '✓' : '✗'} | 
+                                Error: ${flow.stateManagement.error ? '✓' : '✗'}
+                            </div>
+                        </div>
+                        ` : ''}
+                        
+                        ${flow.accessibilityNotes && flow.accessibilityNotes.length > 0 ? `
+                        <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-color);">
+                            <strong style="font-size: 0.75rem; color: #1abc9c; display: block; margin-bottom: 6px;">♿ Accesibilidad:</strong>
+                            <div style="font-size: 0.75rem; color: var(--text-secondary); line-height: 1.5;">
+                                ${flow.accessibilityNotes.map(n => `• ${n}`).join('<br>')}
+                            </div>
+                        </div>
+                        ` : ''}
                     </div>
                 </div>
             `).join('')}
         </div>
+        
+        ${flows._architecture ? `
+        <div class="content-block" style="margin-top: 24px;">
+            <div class="content-block-header">
+                <span class="content-block-title">📜 Reglas Generales de la Aplicación</span>
+            </div>
+            <div class="content-block-body">
+                ${flows._architecture.generalRules ? `
+                <div style="padding: 12px; background: var(--bg-primary); border-radius: var(--radius-sm); margin-bottom: 16px; border-left: 3px solid var(--accent-primary);">
+                    <strong style="color: var(--accent-primary); font-size: 0.95rem;">🌍 Idioma Oficial</strong>
+                    <div style="margin-top: 8px; font-size: 0.85rem; color: var(--text-secondary);">
+                        <div style="margin-bottom: 6px;"><strong>Principal:</strong> ${flows._architecture.generalRules.language?.primary || 'Español'}</div>
+                        <div style="margin-bottom: 6px;"><strong>Formato fechas:</strong> ${flows._architecture.generalRules.language?.localization?.dateFormat || 'DD/MM/YYYY'}</div>
+                        <div style="margin-bottom: 6px;"><strong>Formato números:</strong> ${flows._architecture.generalRules.language?.localization?.numberFormat || '1.234,56'}</div>
+                        ${flows._architecture.generalRules.language?.rules ? `
+                        <details style="margin-top: 8px;">
+                            <summary style="cursor: pointer; color: var(--accent-primary);">Ver todas las reglas de idioma →</summary>
+                            <ul style="margin-top: 8px; padding-left: 20px; line-height: 1.8;">
+                                ${flows._architecture.generalRules.language.rules.map(rule => `<li>${rule}</li>`).join('')}
+                            </ul>
+                        </details>
+                        ` : ''}
+                    </div>
+                </div>
+                
+                <div style="padding: 12px; background: var(--bg-primary); border-radius: var(--radius-sm); margin-bottom: 16px; border-left: 3px solid var(--warning);">
+                    <strong style="color: var(--warning); font-size: 0.95rem;">🎨 Branding y Nombre Comercial</strong>
+                    <div style="margin-top: 8px; font-size: 0.85rem; color: var(--text-secondary);">
+                        ${flows._architecture.generalRules.branding?.naming ? `
+                        <div style="margin-bottom: 8px;"><strong>Regla:</strong> ${flows._architecture.generalRules.branding.naming.rule || 'Usar nombre comercial consistente'}</div>
+                        <div style="background: var(--bg-secondary); padding: 8px; border-radius: var(--radius-sm); margin-bottom: 8px;">
+                            <strong>Formatos de nombre:</strong><br>
+                            • Completo: ${flows._architecture.generalRules.branding.naming.formats?.full || 'N/A'}<br>
+                            • Corto: ${flows._architecture.generalRules.branding.naming.formats?.short || 'N/A'}<br>
+                            • Tagline: ${flows._architecture.generalRules.branding.naming.formats?.tagline || 'N/A'}<br>
+                            • Dominio: ${flows._architecture.generalRules.branding.naming.formats?.domain || 'N/A'}
+                        </div>
+                        ` : ''}
+                        ${flows._architecture.generalRules.branding?.icon ? `
+                        <strong style="display: block; margin-top: 12px; color: var(--info);">📱 Ícono Representativo</strong>
+                        <div style="margin-top: 6px;"><strong>Estilo:</strong> ${flows._architecture.generalRules.branding.icon.specifications?.style || 'Moderno y minimalista'}</div>
+                        <div><strong>Colores:</strong> ${flows._architecture.generalRules.branding.icon.specifications?.colors || 'Colores de marca'}</div>
+                        <div><strong>Escalabilidad:</strong> ${flows._architecture.generalRules.branding.icon.specifications?.scalability || 'Todos los tamaños'}</div>
+                        ` : ''}
+                    </div>
+                </div>
+                
+                ${flows._architecture.generalRules.seo ? `
+                <div style="padding: 12px; background: var(--bg-primary); border-radius: var(--radius-sm); margin-bottom: 16px; border-left: 3px solid var(--success);">
+                    <strong style="color: var(--success); font-size: 0.95rem;">🔍 Optimización SEO</strong>
+                    <div style="margin-top: 8px; font-size: 0.85rem; color: var(--text-secondary);">
+                        <div style="margin-bottom: 8px;"><strong>Regla:</strong> ${flows._architecture.generalRules.seo.rule || 'Optimizar para motores de búsqueda'}</div>
+                        ${flows._architecture.generalRules.seo.general ? `
+                        <strong>Reglas Generales:</strong>
+                        <ul style="margin-top: 6px; padding-left: 20px; line-height: 1.8;">
+                            ${flows._architecture.generalRules.seo.general.slice(0, 5).map(rule => `<li>${rule}</li>`).join('')}
+                        </ul>
+                        ` : ''}
+                        ${flows._architecture.generalRules.seo.contentRules || flows._architecture.generalRules.seo.technical ? `
+                        <details style="margin-top: 8px;">
+                            <summary style="cursor: pointer; color: var(--success);">Ver guías completas de SEO →</summary>
+                            <div style="margin-top: 12px;">
+                                ${flows._architecture.generalRules.seo.contentRules ? `
+                                <strong style="color: var(--info);">Reglas de Contenido:</strong>
+                                <ul style="margin-top: 6px; padding-left: 20px; line-height: 1.8;">
+                                    ${flows._architecture.generalRules.seo.contentRules.map(rule => `<li>${rule}</li>`).join('')}
+                                </ul>
+                                ` : ''}
+                                ${flows._architecture.generalRules.seo.technical ? `
+                                <strong style="display: block; margin-top: 12px; color: var(--info);">Técnico:</strong>
+                                <ul style="margin-top: 6px; padding-left: 20px; line-height: 1.8;">
+                                    ${flows._architecture.generalRules.seo.technical.slice(0, 6).map(rule => `<li>${rule}</li>`).join('')}
+                                </ul>
+                                ` : ''}
+                                ${flows._architecture.generalRules.seo.performance ? `
+                                <strong style="display: block; margin-top: 12px; color: var(--info);">Performance:</strong>
+                                <ul style="margin-top: 6px; padding-left: 20px; line-height: 1.8;">
+                                    ${flows._architecture.generalRules.seo.performance.slice(0, 5).map(rule => `<li>${rule}</li>`).join('')}
+                                </ul>
+                                ` : ''}
+                            </div>
+                        </details>
+                        ` : ''}
+                    </div>
+                </div>
+                ` : ''}
+                
+                ${flows._architecture.generalRules.contentGuidelines ? `
+                <div style="padding: 12px; background: var(--bg-primary); border-radius: var(--radius-sm); border-left: 3px solid var(--info);">
+                    <strong style="color: var(--info); font-size: 0.95rem;">✍️ Guías de Contenido</strong>
+                    <div style="margin-top: 8px; font-size: 0.85rem; color: var(--text-secondary);">
+                        ${flows._architecture.generalRules.contentGuidelines.tone?.characteristics ? `
+                        <strong>Tono de Comunicación:</strong>
+                        <ul style="margin-top: 6px; padding-left: 20px; line-height: 1.8;">
+                            ${flows._architecture.generalRules.contentGuidelines.tone.characteristics.map(char => `<li>${char}</li>`).join('')}
+                        </ul>
+                        ` : ''}
+                        ${flows._architecture.generalRules.contentGuidelines.copywriting ? `
+                        <details style="margin-top: 8px;">
+                            <summary style="cursor: pointer; color: var(--info);">Ver guías de copywriting →</summary>
+                            <div style="margin-top: 12px;">
+                                ${flows._architecture.generalRules.contentGuidelines.copywriting.buttons ? `
+                                <strong>Botones:</strong>
+                                <ul style="margin-top: 6px; padding-left: 20px; line-height: 1.8;">
+                                    ${flows._architecture.generalRules.contentGuidelines.copywriting.buttons.map(rule => `<li>${rule}</li>`).join('')}
+                                </ul>
+                                ` : ''}
+                                ${flows._architecture.generalRules.contentGuidelines.copywriting.errors ? `
+                                <strong style="display: block; margin-top: 8px;">Mensajes de Error:</strong>
+                                <ul style="margin-top: 6px; padding-left: 20px; line-height: 1.8;">
+                                    ${flows._architecture.generalRules.contentGuidelines.copywriting.errors.map(rule => `<li>${rule}</li>`).join('')}
+                                </ul>
+                                ` : ''}
+                            </div>
+                        </details>
+                        ` : ''}
+                    </div>
+                </div>
+                ` : ''}
+                ` : ''}
+            </div>
+        </div>
+        
+        ${flows._architecture.screenTypes ? `
+        <div class="content-block" style="margin-top: 16px;">
+            <div class="content-block-header">
+                <span class="content-block-title">🏗️ Arquitectura y Guías de Consistencia</span>
+            </div>
+            <div class="content-block-body">
+                <div style="padding: 8px; background: var(--bg-primary); border-radius: var(--radius-sm); margin-bottom: 12px;">
+                    <strong style="color: var(--accent-primary);">📋 Tipos de Pantallas Definidos:</strong>
+                    <ul style="margin-top: 8px; padding-left: 20px; font-size: 0.85rem; color: var(--text-secondary); line-height: 1.8;">
+                        ${Object.entries(flows._architecture.screenTypes).map(([key, type]) => `
+                            <li><strong>${type.types?.join(', ') || key}</strong>: ${type.characteristics || 'N/A'}</li>
+                        `).join('')}
+                    </ul>
+                </div>
+                ${flows._architecture.consistencyRules ? `
+                <div style="padding: 8px; background: var(--bg-primary); border-radius: var(--radius-sm);">
+                    <strong style="color: var(--accent-primary);">🎯 Reglas de Consistencia Visual:</strong>
+                    <ul style="margin-top: 8px; padding-left: 20px; font-size: 0.85rem; color: var(--text-secondary); line-height: 1.8;">
+                        ${flows._architecture.consistencyRules.spacing ? `<li><strong>Espaciado:</strong> ${flows._architecture.consistencyRules.spacing.rule} (${flows._architecture.consistencyRules.spacing.scale})</li>` : ''}
+                        ${flows._architecture.consistencyRules.typography ? `<li><strong>Tipografía:</strong> ${flows._architecture.consistencyRules.typography.rule}</li>` : ''}
+                        ${flows._architecture.consistencyRules.colors ? `<li><strong>Colores:</strong> ${flows._architecture.consistencyRules.colors.rule}</li>` : ''}
+                        ${flows._architecture.consistencyRules.components ? `<li><strong>Componentes:</strong> ${flows._architecture.consistencyRules.components.principle}</li>` : ''}
+                        ${flows._architecture.consistencyRules.animations ? `<li><strong>Animaciones:</strong> ${flows._architecture.consistencyRules.animations.rule}</li>` : ''}
+                    </ul>
+                </div>
+                ` : ''}
+            </div>
+        </div>
+        ` : ''}
+        ` : ''}
     `;
 }
 
@@ -8003,3 +10373,439 @@ class LoadingManager {
         }
     }
 }
+
+// ====================
+// MODAL FUNCTIONS
+// ====================
+let projectToDelete = null;
+
+function openDeleteModal(projectId) {
+    projectToDelete = projectId;
+    const modal = document.getElementById('deleteModal');
+    if (modal) {
+        modal.style.display = 'flex';
+    }
+}
+
+function closeDeleteModal() {
+    const modal = document.getElementById('deleteModal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+    projectToDelete = null;
+}
+
+function confirmDelete() {
+    if (projectToDelete) {
+        // Find and remove the project
+        const index = state.projects.findIndex(p => p.id === projectToDelete);
+        if (index !== -1) {
+            state.projects.splice(index, 1);
+            saveProjects();
+            
+            // If we deleted the current project, clear the view
+            if (state.currentProjectId === projectToDelete) {
+                state.currentProjectId = null;
+                if (app) {
+                    app.currentProject = null;
+                }
+                // Show welcome screen
+                const welcomeScreen = document.getElementById('welcomeScreen');
+                const projectView = document.getElementById('projectView');
+                const projectForm = document.getElementById('projectForm');
+                
+                if (welcomeScreen) welcomeScreen.style.display = 'block';
+                if (projectView) projectView.style.display = 'none';
+                if (projectForm) projectForm.style.display = 'none';
+                
+                document.getElementById('headerTitle').textContent = 'Bienvenido a FlowForge';
+            }
+            
+            // Update projects list
+            renderProjectsList();
+            
+            if (app) {
+                app.showNotification('Proyecto eliminado', 'success');
+            }
+        }
+    }
+    closeDeleteModal();
+}
+
+function showVersionsModal() {
+    const modal = document.getElementById('versionsModal');
+    if (modal) {
+        modal.style.display = 'flex';
+        renderVersionsList();
+    }
+}
+
+function closeVersionsModal() {
+    const modal = document.getElementById('versionsModal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+}
+
+function createVersion() {
+    const nameInput = document.getElementById('versionNameInput');
+    const versionName = nameInput?.value?.trim() || `Versión ${new Date().toLocaleDateString('es-ES')}`;
+    
+    let project = null;
+    if (state.currentProjectId) {
+        project = state.projects.find(p => p.id === state.currentProjectId);
+    }
+    if (!project && app && app.currentProject) {
+        project = app.currentProject;
+    }
+    
+    if (!project) {
+        if (app) app.showNotification('No hay proyecto seleccionado', 'warning');
+        return;
+    }
+    
+    // Initialize versions array if needed
+    if (!project.versions) {
+        project.versions = [];
+    }
+    
+    // Create version snapshot
+    const version = {
+        id: Date.now(),
+        name: versionName,
+        createdAt: new Date().toISOString(),
+        snapshot: JSON.parse(JSON.stringify(project.data))
+    };
+    
+    project.versions.push(version);
+    
+    // Save
+    saveProjects();
+    if (app) {
+        app.saveData();
+        app.showNotification(`Versión "${versionName}" creada`, 'success');
+    }
+    
+    // Clear input and refresh list
+    if (nameInput) nameInput.value = '';
+    renderVersionsList();
+}
+
+function renderVersionsList() {
+    const container = document.getElementById('versionsList');
+    if (!container) return;
+    
+    let project = null;
+    if (state.currentProjectId) {
+        project = state.projects.find(p => p.id === state.currentProjectId);
+    }
+    if (!project && app && app.currentProject) {
+        project = app.currentProject;
+    }
+    
+    if (!project || !project.versions || project.versions.length === 0) {
+        container.innerHTML = '<p style="color: var(--text-secondary); text-align: center; padding: 20px;">No hay versiones guardadas</p>';
+        return;
+    }
+    
+    container.innerHTML = project.versions.map(v => `
+        <div class="version-item" style="display: flex; justify-content: space-between; align-items: center; padding: 12px; border: 1px solid var(--border-color); border-radius: var(--radius-md); margin-bottom: 8px;">
+            <div>
+                <strong>${escapeHtml(v.name)}</strong>
+                <p style="font-size: 0.85rem; color: var(--text-secondary); margin: 4px 0 0;">${new Date(v.createdAt).toLocaleString('es-ES')}</p>
+            </div>
+            <div style="display: flex; gap: 8px;">
+                <button class="header-btn" onclick="restoreVersion(${v.id})" title="Restaurar esta versión">↺ Restaurar</button>
+                <button class="header-btn danger-btn" onclick="deleteVersion(${v.id})" title="Eliminar versión" style="background: var(--error); color: white;">✕</button>
+            </div>
+        </div>
+    `).join('');
+}
+
+function restoreVersion(versionId) {
+    let project = null;
+    if (state.currentProjectId) {
+        project = state.projects.find(p => p.id === state.currentProjectId);
+    }
+    if (!project && app && app.currentProject) {
+        project = app.currentProject;
+    }
+    
+    if (!project || !project.versions) return;
+    
+    const version = project.versions.find(v => v.id === versionId);
+    if (!version) return;
+    
+    if (confirm(`¿Restaurar la versión "${version.name}"? Los cambios no guardados se perderán.`)) {
+        project.data = JSON.parse(JSON.stringify(version.snapshot));
+        
+        // Save
+        saveProjects();
+        if (app) {
+            app.currentProject = project;
+            app.saveData();
+            app.showNotification(`Versión "${version.name}" restaurada`, 'success');
+        }
+        
+        // Refresh UI
+        populateProjectFields(project.data);
+        updatePromptOutput();
+        closeVersionsModal();
+    }
+}
+
+function deleteVersion(versionId) {
+    let project = null;
+    if (state.currentProjectId) {
+        project = state.projects.find(p => p.id === state.currentProjectId);
+    }
+    if (!project && app && app.currentProject) {
+        project = app.currentProject;
+    }
+    
+    if (!project || !project.versions) return;
+    
+    const index = project.versions.findIndex(v => v.id === versionId);
+    if (index !== -1) {
+        project.versions.splice(index, 1);
+        saveProjects();
+        if (app) app.saveData();
+        renderVersionsList();
+        if (app) app.showNotification('Versión eliminada', 'success');
+    }
+}
+
+function showShareModal() {
+    const modal = document.getElementById('shareModal');
+    if (!modal) return;
+    
+    let project = null;
+    if (state.currentProjectId) {
+        project = state.projects.find(p => p.id === state.currentProjectId);
+    }
+    if (!project && app && app.currentProject) {
+        project = app.currentProject;
+    }
+    
+    if (!project) {
+        if (app) app.showNotification('No hay proyecto seleccionado', 'warning');
+        return;
+    }
+    
+    // Generate shareable data
+    const shareData = {
+        name: project.name,
+        category: project.category,
+        data: project.data,
+        exportedAt: new Date().toISOString()
+    };
+    
+    // Create base64 encoded URL parameter
+    const encoded = btoa(encodeURIComponent(JSON.stringify(shareData)));
+    const shareUrl = `${window.location.origin}${window.location.pathname}?import=${encoded}`;
+    
+    const shareLinkInput = document.getElementById('shareLinkInput');
+    if (shareLinkInput) {
+        shareLinkInput.value = shareUrl;
+    }
+    
+    modal.style.display = 'flex';
+}
+
+function closeShareModal() {
+    const modal = document.getElementById('shareModal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+    // Hide QR if shown
+    const qrContainer = document.getElementById('qrCodeContainer');
+    if (qrContainer) {
+        qrContainer.style.display = 'none';
+        qrContainer.innerHTML = '';
+    }
+}
+
+function copyShareLink() {
+    const shareLinkInput = document.getElementById('shareLinkInput');
+    if (shareLinkInput) {
+        navigator.clipboard.writeText(shareLinkInput.value).then(() => {
+            if (app) app.showNotification('Enlace copiado al portapapeles', 'success');
+        }).catch(() => {
+            shareLinkInput.select();
+            document.execCommand('copy');
+            if (app) app.showNotification('Enlace copiado', 'success');
+        });
+    }
+}
+
+function generateQRCode() {
+    const shareLinkInput = document.getElementById('shareLinkInput');
+    const qrContainer = document.getElementById('qrCodeContainer');
+    
+    if (!shareLinkInput || !qrContainer) return;
+    
+    const url = shareLinkInput.value;
+    
+    // Use a simple QR code API
+    qrContainer.innerHTML = `
+        <div style="text-align: center; padding: 20px;">
+            <img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(url)}" 
+                 alt="QR Code para compartir proyecto" 
+                 style="border-radius: 8px; border: 2px solid var(--border-color);">
+            <p style="margin-top: 12px; font-size: 0.85rem; color: var(--text-secondary);">Escanea para importar el proyecto</p>
+        </div>
+    `;
+    qrContainer.style.display = 'block';
+    
+    // Hide QR button
+    const qrBtn = document.getElementById('qrBtn');
+    if (qrBtn) qrBtn.style.display = 'none';
+}
+
+// ====================
+// PROJECTS LIST RENDERING
+// ====================
+function renderProjectsList() {
+    const container = document.getElementById('projectsList');
+    if (!container) return;
+    
+    if (!state.projects || state.projects.length === 0) {
+        container.innerHTML = '<p style="color: var(--text-secondary); text-align: center; padding: 20px; font-size: 0.9rem;">No hay proyectos guardados</p>';
+        return;
+    }
+    
+    container.innerHTML = state.projects.map(project => `
+        <div class="project-item ${state.currentProjectId === project.id ? 'active' : ''}" onclick="loadProject(${project.id})">
+            <div class="project-item-header">
+                <span class="project-item-name">${escapeHtml(project.name)}</span>
+                <button class="project-item-delete" onclick="event.stopPropagation(); openDeleteModal(${project.id})" title="Eliminar proyecto">✕</button>
+            </div>
+            <div class="project-item-meta">
+                <span class="project-item-category">${project.category || 'Sin categoría'}</span>
+                <span class="project-item-date">${new Date(project.updatedAt || project.createdAt).toLocaleDateString('es-ES')}</span>
+            </div>
+        </div>
+    `).join('');
+}
+
+function loadProject(projectId) {
+    const project = state.projects.find(p => p.id === projectId);
+    if (!project) return;
+    
+    state.currentProjectId = projectId;
+    
+    if (app) {
+        app.currentProject = project;
+    }
+    
+    // Update UI
+    document.getElementById('headerTitle').textContent = project.name;
+    
+    // Hide form/welcome, show project view
+    const welcomeScreen = document.getElementById('welcomeScreen');
+    const projectForm = document.getElementById('projectForm');
+    const projectView = document.getElementById('projectView');
+    
+    if (welcomeScreen) welcomeScreen.style.display = 'none';
+    if (projectForm) projectForm.style.display = 'none';
+    if (projectView) projectView.style.display = 'block';
+    
+    // If project was already approved, show main tabs
+    if (project.overviewApproved) {
+        const overview = document.getElementById('overviewSection');
+        const mainTabs = document.getElementById('mainTabs');
+        const promptBuilder = document.getElementById('promptBuilder');
+        const saveBtn = document.getElementById('saveBtn');
+        const exportBtn = document.getElementById('exportBtn');
+        
+        if (overview) overview.style.display = 'none';
+        if (mainTabs) mainTabs.style.display = 'block';
+        if (promptBuilder) promptBuilder.style.display = 'block';
+        if (saveBtn) saveBtn.style.display = 'inline-flex';
+        if (exportBtn) exportBtn.style.display = 'inline-flex';
+        
+        // Populate fields
+        if (project.data) {
+            populateProjectFields(project.data);
+        }
+    } else {
+        // Show overview for approval
+        const overview = document.getElementById('overviewSection');
+        const mainTabs = document.getElementById('mainTabs');
+        
+        if (overview) overview.style.display = 'block';
+        if (mainTabs) mainTabs.style.display = 'none';
+        
+        populateOverview(project);
+    }
+    
+    // Update projects list to show active state
+    renderProjectsList();
+    
+    if (app) {
+        app.showNotification(`Proyecto "${project.name}" cargado`, 'success');
+    }
+}
+
+// Escape HTML helper (global)
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+// Check for import parameter on load
+function checkForImport() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const importData = urlParams.get('import');
+    
+    if (importData) {
+        try {
+            const decoded = JSON.parse(decodeURIComponent(atob(importData)));
+            
+            if (confirm(`¿Importar el proyecto "${decoded.name}"?`)) {
+                const newProject = {
+                    id: Date.now(),
+                    name: decoded.name,
+                    category: decoded.category,
+                    description: '',
+                    data: decoded.data,
+                    createdAt: new Date().toISOString(),
+                    updatedAt: new Date().toISOString(),
+                    overviewApproved: true
+                };
+                
+                state.projects.push(newProject);
+                saveProjects();
+                
+                // Load the imported project
+                loadProject(newProject.id);
+                
+                if (app) {
+                    app.showNotification(`Proyecto "${decoded.name}" importado`, 'success');
+                }
+            }
+            
+            // Clean URL
+            window.history.replaceState({}, document.title, window.location.pathname);
+        } catch (error) {
+            console.error('Error importing project:', error);
+            if (app) {
+                app.showNotification('Error al importar el proyecto', 'error');
+            }
+        }
+    }
+}
+
+// Initialize on load
+document.addEventListener('DOMContentLoaded', () => {
+    renderProjectsList();
+    checkForImport();
+    
+    // Inicializar mejoras de accesibilidad
+    A11yEnhancements.init();
+    
+    // Verificar si hay proyecto para importar via URL
+    ProjectSharing.importFromLink();
+});
