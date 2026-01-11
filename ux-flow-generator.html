@@ -50,7 +50,7 @@
     <div class="app-container">
         <!-- Sidebar -->
         <aside class="sidebar" id="sidebar" role="navigation" aria-label="Navegación principal">
-            <div class="logo">
+            <div class="logo" onclick="goToHome()" style="cursor: pointer;" title="Ir al inicio">
                 <h1>FlowForge
                     <span>Generador UX/UI v1.0</span>
                 </h1>
@@ -86,6 +86,17 @@
         <main class="main-content" id="main-content" role="main">
             <header class="header" role="banner">
                 <button class="mobile-menu-btn" onclick="toggleSidebar()">☰</button>
+                
+                <!-- Navigation Arrows -->
+                <div class="nav-arrows" id="navArrows">
+                    <button class="nav-arrow-btn" id="navBackBtn" onclick="navigateBack()" title="Retroceder" aria-label="Volver atrás">
+                        ←
+                    </button>
+                    <button class="nav-arrow-btn" id="navHomeBtn" onclick="goToHome()" title="Ir al inicio" aria-label="Ir al inicio">
+                        ⌂
+                    </button>
+                </div>
+                
                 <h2 class="header-title" id="headerTitle">Bienvenido a FlowForge</h2>
                 <div class="header-actions">
                     <div class="undo-redo-controls" id="undoRedoControls" style="display: none;">
@@ -204,13 +215,15 @@
                         <div class="tabs-header">
                             <button class="tab-btn active" data-tab="description">📝 Descripción</button>
                             <button class="tab-btn" data-tab="flows">📱 Flujos de Pantalla</button>
+                            <button class="tab-btn" data-tab="preview">👁️ Vista Previa</button>
                             <button class="tab-btn" data-tab="tokens">🎨 Design Tokens</button>
                             <button class="tab-btn" data-tab="elements">🧩 Elementos UI</button>
                             <button class="tab-btn" data-tab="metrics">📊 Métricas</button>
                             <button class="tab-btn" data-tab="generalRules">📜 Reglas Generales</button>
                             <button class="tab-btn" data-tab="architecture">🏗️ Arquitectura</button>
                             <button class="tab-btn" data-tab="consistency">✓ Consistencia</button>
-                            <button class="tab-btn" data-tab="development" disabled title="Completa el flujo de diseño primero">💻 Desarrollo</button>
+                            <button class="tab-btn" data-tab="prompt">🔧 Prompt</button>
+                            <button class="tab-btn" data-tab="development">💻 Desarrollo</button>
                         </div>
 
                         <!-- Description Tab -->
@@ -306,7 +319,59 @@
                                 <!-- Flows will be rendered here -->
                             </div>
                         </div>
-
+                        <!-- Preview Tab -->
+                        <div class="tab-content" id="tab-preview">
+                            <div class="preview-controls" style="display: flex; gap: 16px; margin-bottom: 20px; flex-wrap: wrap; align-items: center;">
+                                <div style="flex: 1; min-width: 200px;">
+                                    <label style="display: block; margin-bottom: 6px; font-weight: 600; font-size: 0.9rem;">📱 Nivel de Flujos:</label>
+                                    <select id="previewTier" style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: var(--radius-md); background: var(--bg-primary); color: var(--text-primary); font-size: 0.95rem;">
+                                        <option value="">Selecciona un tier</option>
+                                    </select>
+                                </div>
+                                
+                                <div style="flex: 1; min-width: 200px;">
+                                    <label style="display: block; margin-bottom: 6px; font-weight: 600; font-size: 0.9rem;">🖼️ Pantalla:</label>
+                                    <select id="previewScreen" disabled style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: var(--radius-md); background: var(--bg-primary); color: var(--text-primary); font-size: 0.95rem;">
+                                        <option value="">Primero selecciona un tier</option>
+                                    </select>
+                                </div>
+                                
+                                <div style="flex: 1; min-width: 200px;">
+                                    <label style="display: block; margin-bottom: 6px; font-weight: 600; font-size: 0.9rem;">📐 Layout:</label>
+                                    <select id="previewTemplate" style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: var(--radius-md); background: var(--bg-primary); color: var(--text-primary); font-size: 0.95rem;">
+                                        <option value="list">📋 Lista Vertical</option>
+                                        <option value="grid">⊞ Grid 2 Columnas</option>
+                                        <option value="feed">📱 Feed/Timeline</option>
+                                        <option value="dashboard">📊 Dashboard</option>
+                                    </select>
+                                </div>
+                                
+                                <div style="flex: 1; min-width: 200px;">
+                                    <label style="display: block; margin-bottom: 6px; font-weight: 600; font-size: 0.9rem;">💻 Dispositivo:</label>
+                                    <select id="previewDevice" style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: var(--radius-md); background: var(--bg-primary); color: var(--text-primary); font-size: 0.95rem;">
+                                        <option value="mobile">📱 Mobile (375px)</option>
+                                        <option value="tablet">📱 Tablet (768px)</option>
+                                        <option value="desktop">💻 Desktop (1440px)</option>
+                                    </select>
+                                </div>
+                            </div>
+                            
+                            <div style="display: flex; gap: 12px; margin-bottom: 20px;">
+                                <button onclick="updatePreview()" class="header-btn primary" style="flex: 1;">
+                                    🔄 Actualizar Vista Previa
+                                </button>
+                                <button onclick="downloadPreviewHTML()" class="header-btn" style="flex: 1;">
+                                    📥 Descargar HTML
+                                </button>
+                                <button onclick="copyPreviewHTML()" class="header-btn" style="flex: 1;">
+                                    📋 Copiar Código
+                                </button>
+                            </div>
+                            
+                            <div style="border: 1px solid var(--border-color); border-radius: var(--radius-lg); overflow: hidden; background: #f5f5f5;">
+                                <iframe id="previewFrame" srcdoc='<body style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:system-ui;color:#666;text-align:center;padding:20px;"><div><div style="font-size:4rem;margin-bottom:1rem;animation:pulse 2s infinite;">👁️</div><h2 style="color:#333;margin-bottom:0.5rem;">Vista Previa de Pantallas</h2><p>Selecciona un tier y una pantalla para ver la vista previa generada</p><p style="margin-top:1rem;font-size:0.9rem;opacity:0.7;">Elige entre 4 layouts diferentes y 3 tamaños de dispositivo</p></div><style>@keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.1)}}</style></body>' style="width: 100%; height: 700px; border: none; display: block;"></iframe>
+                            </div>
+                        </div>
                         <!-- Tokens Tab -->
                         <div class="tab-content" id="tab-tokens">
                             <div id="tokensContainer">
@@ -372,9 +437,11 @@
 
                         <!-- Development Tab -->
                         <div class="tab-content" id="tab-development">
-                            <div class="development-header">
-                                <h2>💻 Fase de Desarrollo Técnico</h2>
-                                <p>Sube las pantallas HTML generadas y obtén la estructura de desarrollo completa</p>
+                            <div class="development-header" style="text-align: center; padding: 32px 24px; background: var(--bg-secondary); border-radius: var(--radius-md); margin-bottom: 24px;">
+                                <h2 style="color: var(--accent-primary); margin-bottom: 12px;">💻 Fase de Desarrollo Técnico</h2>
+                                <p style="color: var(--text-secondary); font-size: 1rem; max-width: 700px; margin: 0 auto;">
+                                    Sube las pantallas HTML diseñadas para obtener análisis automático, estructura de proyecto y prompt técnico para tu agente de desarrollo
+                                </p>
                             </div>
 
                             <div class="development-workflow">
@@ -457,38 +524,42 @@
                                 </div>
                             </div>
                         </div>
-                    </div>
+                        <!-- Prompt Tab -->
+                        <div class="tab-content" id="tab-prompt">
+                            <div class="prompt-builder-content">
+                                <h3 class="content-section-title">🔧 Constructor de Prompt para Agente de Diseño</h3>
+                                <p style="color: var(--text-muted); margin-bottom: 16px; font-size: 0.9rem;">Selecciona las secciones que deseas incluir en tu prompt personalizado:</p>
+                                
+                                <div class="prompt-sections" id="promptSections">
+                                    <button class="prompt-section-toggle" data-section="whatIs">Qué es</button>
+                                    <button class="prompt-section-toggle" data-section="targetAudience">Nicho</button>
+                                    <button class="prompt-section-toggle" data-section="needsSolved">Necesidades</button>
+                                    <button class="prompt-section-toggle" data-section="differentiators">Diferenciadores</button>
+                                    <button class="prompt-section-toggle" data-section="elevatorPitch">Elevator Pitch</button>
+                                    <button class="prompt-section-toggle" data-section="appType">Tipo App</button>
+                                    <button class="prompt-section-toggle" data-section="flowsMvp">Flujos MVP</button>
+                                    <button class="prompt-section-toggle" data-section="flowsIntermediate">Flujos Intermediate</button>
+                                    <button class="prompt-section-toggle" data-section="flowsComplete">Flujos Complete</button>
+                                    <button class="prompt-section-toggle" data-section="generalRules">📜 Reglas Generales</button>
+                                    <button class="prompt-section-toggle" data-section="architecture">🏗️ Arquitectura</button>
+                                    <button class="prompt-section-toggle" data-section="consistency">✓ Consistencia</button>
+                                    <button class="prompt-section-toggle" data-section="tokens">Design Tokens</button>
+                                    <button class="prompt-section-toggle" data-section="uiComponents">Componentes</button>
+                                    <button class="prompt-section-toggle" data-section="metrics">Métricas</button>
+                                </div>
 
-                    <!-- Prompt Builder -->
-                    <div class="prompt-builder" id="promptBuilder" style="display: none;">
-                        <h3 class="prompt-builder-title">🔧 Constructor de Prompt para Agente de Diseño</h3>
-                        <p style="color: var(--text-muted); margin-bottom: 16px; font-size: 0.9rem;">Selecciona las secciones que deseas incluir en tu prompt personalizado:</p>
-                        
-                        <div class="prompt-sections" id="promptSections">
-                            <button class="prompt-section-toggle active" data-section="whatIs">Qué es</button>
-                            <button class="prompt-section-toggle active" data-section="targetAudience">Nicho</button>
-                            <button class="prompt-section-toggle active" data-section="needsSolved">Necesidades</button>
-                            <button class="prompt-section-toggle" data-section="differentiators">Diferenciadores</button>
-                            <button class="prompt-section-toggle" data-section="elevatorPitch">Elevator Pitch</button>
-                            <button class="prompt-section-toggle active" data-section="appType">Tipo App</button>
-                            <button class="prompt-section-toggle active" data-section="flowsMvp">Flujos MVP</button>
-                            <button class="prompt-section-toggle" data-section="flowsIntermediate">Flujos Intermediate</button>
-                            <button class="prompt-section-toggle" data-section="flowsComplete">Flujos Complete</button>
-                            <button class="prompt-section-toggle" data-section="generalRules">📜 Reglas Generales</button>
-                            <button class="prompt-section-toggle" data-section="architecture">🏗️ Arquitectura</button>
-                            <button class="prompt-section-toggle" data-section="consistency">✓ Consistencia</button>
-                            <button class="prompt-section-toggle active" data-section="tokens">Design Tokens</button>
-                            <button class="prompt-section-toggle" data-section="uiComponents">Componentes</button>
-                            <button class="prompt-section-toggle" data-section="metrics">Métricas</button>
-                        </div>
+                                <div class="prompt-output" id="promptOutput">
+                                    <div style="text-align: center; padding: 40px 20px; color: var(--text-muted);">
+                                        <p style="font-size: 1.1rem; margin-bottom: 8px;">👆 Selecciona las secciones que deseas incluir</p>
+                                        <p style="font-size: 0.9rem;">El prompt se generará automáticamente con el contenido seleccionado</p>
+                                    </div>
+                                </div>
 
-                        <div class="prompt-output" id="promptOutput">
-                            <!-- Generated prompt will appear here -->
-                        </div>
-
-                        <div class="prompt-actions">
-                            <button class="header-btn primary" onclick="copyPrompt()">⎘ Copiar Prompt</button>
-                            <button class="header-btn" onclick="regeneratePrompt()">↻ Regenerar</button>
+                                <div class="prompt-actions">
+                                    <button class="header-btn primary" onclick="copyPrompt()">⎘ Copiar Prompt</button>
+                                    <button class="header-btn" onclick="regeneratePrompt()">↻ Regenerar</button>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>

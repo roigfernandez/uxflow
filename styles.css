@@ -1064,6 +1064,63 @@ body {
     font-size: 1.2rem;
 }
 
+/* Navigation Arrows */
+.nav-arrows {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-right: 12px;
+}
+
+.nav-arrow-btn {
+    width: 32px;
+    height: 32px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    color: var(--text-secondary);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1rem;
+    transition: var(--transition);
+}
+
+.nav-arrow-btn:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+    border-color: var(--accent-primary);
+}
+
+.nav-arrow-btn:active {
+    transform: scale(0.95);
+}
+
+.nav-arrow-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.nav-arrow-btn:disabled:hover {
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+    border-color: var(--border-color);
+}
+
+/* Logo clickeable */
+.logo {
+    transition: var(--transition);
+}
+
+.logo:hover {
+    opacity: 0.85;
+}
+
+.logo:active {
+    transform: scale(0.98);
+}
+
 .api-key-section {
     padding: 16px;
     border-bottom: 1px solid var(--border-color);
@@ -1597,9 +1654,10 @@ select:focus-visible {
     border: 1px solid var(--border-color);
     border-radius: 12px;
     font-size: 0.75rem;
-    display: flex;
+    display: inline-flex;
     align-items: center;
     gap: 4px;
+    margin: 2px;
 }
 
 .keyword-tag.matched {
@@ -1889,6 +1947,33 @@ button:focus-visible, .btn-primary:focus-visible, .btn-secondary:focus-visible {
     background: var(--bg-hover);
     border-color: var(--accent-primary);
     transform: translateY(-1px);
+}
+
+/* Botón guardar con cambios pendientes */
+.action-btn.has-changes {
+    border-color: var(--warning) !important;
+    background: rgba(245, 158, 11, 0.15) !important;
+    animation: pulse-warning 2s infinite;
+    position: relative;
+}
+
+.action-btn.has-changes::after {
+    content: '•';
+    position: absolute;
+    top: -2px;
+    right: -2px;
+    color: var(--warning);
+    font-size: 1.5rem;
+    line-height: 1;
+}
+
+@keyframes pulse-warning {
+    0%, 100% {
+        box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.4);
+    }
+    50% {
+        box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.2);
+    }
 }
 
 .templates-btn:hover {

@@ -305,7 +305,7 @@ class ProjectVersioning {
             if (project) {
                 project.data = JSON.parse(JSON.stringify(version.data));
                 project.updatedAt = new Date().toISOString();
-                saveProjects();
+                markUnsavedChanges();
                 return true;
             }
         }
@@ -492,8 +492,18 @@ class AlignmentAnalyzer {
         // Usar descripción expandida si existe, sino la descripción original
         const referenceDescription = userInput.expandedDescription || userInput.description;
         
+        // Combinar todo el contenido generado para buscar keywords
+        const allGeneratedContent = [
+            generatedOutput.whatIs || '',
+            generatedOutput.targetAudience || '',
+            generatedOutput.needsSolved || '',
+            generatedOutput.mainFeatures || '',
+            generatedOutput.differentiators || '',
+            generatedOutput.elevatorPitch || ''
+        ].join(' ');
+        
         const inputKeywords = this.extractKeywords(referenceDescription);
-        const outputKeywords = this.extractKeywords(generatedOutput.whatIs);
+        const outputKeywords = this.extractKeywords(allGeneratedContent);
         
         const analysis = {
             score: 0,
@@ -508,14 +518,24 @@ class AlignmentAnalyzer {
             recommendations: []
         };
         
-        // Comparar keywords
+        // Comparar keywords - matching basado solo en keywords extraídos
         inputKeywords.forEach(keyword => {
-            const found = outputKeywords.some(out => 
-                out.toLowerCase().includes(keyword.toLowerCase()) ||
-                keyword.toLowerCase().includes(out.toLowerCase())
-            );
+            const keywordLower = keyword.toLowerCase();
             
-            if (found) {
+            // Buscar SOLO en las keywords extraídas del output (no en todo el texto)
+            const foundInKeywords = outputKeywords.some(out => {
+                const outLower = out.toLowerCase();
+                // Coincidencia exacta
+                if (outLower === keywordLower) return true;
+                // Uno contiene al otro (pero con longitud mínima para evitar falsos positivos)
+                if (outLower.includes(keywordLower) && keywordLower.length >= 5) return true;
+                if (keywordLower.includes(outLower) && outLower.length >= 5) return true;
+                // Similitud aproximada (para variaciones como singular/plural)
+                if (this.areSimilar(keywordLower, outLower)) return true;
+                return false;
+            });
+            
+            if (foundInKeywords) {
                 analysis.matched.push(keyword);
             } else {
                 analysis.missing.push(keyword);
@@ -695,6 +715,339 @@ class AlignmentAnalyzer {
         if (score >= 65) return { level: 'good', label: 'Buena', icon: '✓' };
         if (score >= 50) return { level: 'fair', label: 'Aceptable', icon: '⚠' };
         return { level: 'poor', label: 'Baja', icon: '✕' };
+    }
+    
+    // Método auxiliar para detectar similitud entre palabras (singular/plural, variaciones)
+    static areSimilar(word1, word2) {
+        // Si son muy cortas, no comparar
+        if (word1.length < 4 || word2.length < 4) return false;
+        
+        // Calcular distancia de Levenshtein simplificada
+        const maxLen = Math.max(word1.length, word2.length);
+        const minLen = Math.min(word1.length, word2.length);
+        
+        // Si la diferencia de longitud es muy grande, no son similares
+        if (maxLen - minLen > 3) return false;
+        
+        // Contar caracteres en común en las mismas posiciones
+        let matches = 0;
+        const len = Math.min(word1.length, word2.length);
+        for (let i = 0; i < len; i++) {
+            if (word1[i] === word2[i]) matches++;
+        }
+        
+        // Si más del 75% de los caracteres coinciden, son similares
+        return (matches / maxLen) >= 0.75;
+    }
+}
+
+// ====================
+// PREVIEW GENERATOR CLASS
+// ====================
+class PreviewGenerator {
+    static generateHTMLPreview(flow, template = 'list', device = 'mobile', projectName = '') {
+        const deviceWidths = {
+            mobile: '375px',
+            tablet: '768px',
+            desktop: '1440px'
+        };
+        
+        const width = deviceWidths[device] || '375px';
+        const hasHeader = flow.globalElements?.header;
+        const hasBottomNav = flow.globalElements?.bottomNav;
+        
+        return `<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>${this.sanitize(flow.screen)}</title>
+    <style>
+        * { 
+            margin: 0; 
+            padding: 0; 
+            box-sizing: border-box; 
+        }
+        
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: #f5f5f5;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .device-frame {
+            width: 100%;
+            max-width: ${width};
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.15);
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            min-height: 600px;
+        }
+        
+        .screen-header {
+            padding: 16px 20px;
+            background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        
+        .screen-header .logo {
+            font-size: 1.2rem;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .screen-header .logo::before {
+            content: '📱';
+            font-size: 1.5rem;
+        }
+        
+        .screen-header .actions {
+            display: flex;
+            gap: 12px;
+        }
+        
+        .screen-header .icon-btn {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            background: rgba(255,255,255,0.2);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        
+        .screen-header .icon-btn:hover {
+            background: rgba(255,255,255,0.3);
+        }
+        
+        .screen-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+        }
+        
+        .bottom-nav {
+            display: flex;
+            justify-content: space-around;
+            padding: 12px 0;
+            background: white;
+            border-top: 1px solid #e5e7eb;
+            box-shadow: 0 -2px 10px rgba(0,0,0,0.05);
+        }
+        
+        .bottom-nav-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+            padding: 8px 16px;
+            color: #6b7280;
+            font-size: 0.75rem;
+            cursor: pointer;
+            transition: color 0.2s;
+            text-decoration: none;
+        }
+        
+        .bottom-nav-item:hover,
+        .bottom-nav-item.active {
+            color: #6366f1;
+        }
+        
+        .bottom-nav-item .icon {
+            font-size: 1.5rem;
+        }
+        
+        /* Layout Templates */
+        .layout-list .element-item {
+            padding: 16px;
+            margin-bottom: 12px;
+            background: #f9fafb;
+            border-radius: 12px;
+            border-left: 4px solid #6366f1;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        
+        .layout-list .element-item:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+        
+        .layout-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 16px;
+        }
+        
+        .layout-grid .element-item {
+            padding: 16px;
+            background: #f9fafb;
+            border-radius: 12px;
+            text-align: center;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            transition: transform 0.2s;
+        }
+        
+        .layout-grid .element-item:hover {
+            transform: scale(1.05);
+        }
+        
+        .layout-feed .element-item {
+            padding: 16px;
+            margin-bottom: 16px;
+            background: white;
+            border: 1px solid #e5e7eb;
+            border-radius: 12px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+        }
+        
+        .layout-feed .element-item::before {
+            content: '👤';
+            font-size: 2rem;
+            display: block;
+            margin-bottom: 8px;
+        }
+        
+        .layout-dashboard {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 16px;
+        }
+        
+        .layout-dashboard .element-item {
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 12px;
+            min-height: 120px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+        
+        .layout-dashboard .element-item .value {
+            font-size: 2rem;
+            font-weight: 700;
+        }
+        
+        .layout-dashboard .element-item .label {
+            font-size: 0.85rem;
+            opacity: 0.9;
+        }
+        
+        .element-item {
+            font-size: 0.9rem;
+            color: #374151;
+            line-height: 1.5;
+        }
+        
+        .screen-title {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: #111827;
+            margin-bottom: 8px;
+        }
+        
+        .screen-description {
+            font-size: 0.95rem;
+            color: #6b7280;
+            margin-bottom: 24px;
+            line-height: 1.6;
+        }
+        
+        @media (max-width: 640px) {
+            .layout-grid,
+            .layout-dashboard {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="device-frame">
+        ${hasHeader ? `
+        <div class="screen-header">
+            <div class="logo">${projectName || 'App'}</div>
+            <div class="actions">
+                <div class="icon-btn">🔍</div>
+                <div class="icon-btn">🔔</div>
+                <div class="icon-btn">👤</div>
+            </div>
+        </div>
+        ` : ''}
+        
+        <div class="screen-content">
+            <h1 class="screen-title">${this.sanitize(flow.screen)}</h1>
+            <p class="screen-description">${this.sanitize(flow.description)}</p>
+            
+            ${this.renderTemplate(flow.elements, template)}
+        </div>
+        
+        ${hasBottomNav ? `
+        <div class="bottom-nav">
+            <a href="#" class="bottom-nav-item active">
+                <span class="icon">🏠</span>
+                <span>Inicio</span>
+            </a>
+            <a href="#" class="bottom-nav-item">
+                <span class="icon">🔍</span>
+                <span>Buscar</span>
+            </a>
+            <a href="#" class="bottom-nav-item">
+                <span class="icon">➕</span>
+                <span>Crear</span>
+            </a>
+            <a href="#" class="bottom-nav-item">
+                <span class="icon">👤</span>
+                <span>Perfil</span>
+            </a>
+        </div>
+        ` : ''}
+    </div>
+</body>
+</html>`;
+    }
+    
+    static renderTemplate(elements, template) {
+        const layoutClass = `layout-${template}`;
+        
+        return `
+            <div class="${layoutClass}">
+                ${elements.map((el, index) => {
+                    if (template === 'dashboard') {
+                        return `
+                            <div class="element-item">
+                                <div class="value">${index + 1}</div>
+                                <div class="label">${this.sanitize(el)}</div>
+                            </div>
+                        `;
+                    }
+                    return `<div class="element-item">${this.sanitize(el)}</div>`;
+                }).join('')}
+            </div>
+        `;
+    }
+    
+    static sanitize(text) {
+        const temp = document.createElement('div');
+        temp.textContent = text;
+        return temp.innerHTML;
     }
 }
 
@@ -6227,7 +6580,9 @@ let state = {
     selectedPromptSections: ['whatIs', 'targetAudience', 'needsSolved', 'appType', 'flowsMvp', 'tokens'],
     searchQuery: '',
     activeFilter: 'all',
-    isLoadingProject: false
+    isLoadingProject: false,
+    hasUnsavedChanges: false,
+    lastSavedState: null
 };
 
 // Initialize app
@@ -6246,7 +6601,19 @@ document.addEventListener('DOMContentLoaded', () => {
     loadSavedAPIKey();
     setupAPIKeyAutosave();
     setupGlobalEventListeners();
+    setupUnsavedChangesWarning();
 });
+
+// Configurar advertencia al salir con cambios sin guardar
+function setupUnsavedChangesWarning() {
+    window.addEventListener('beforeunload', (e) => {
+        if (state.hasUnsavedChanges) {
+            e.preventDefault();
+            e.returnValue = '⚠️ Tienes cambios sin guardar. ¿Deseas salir sin guardar los cambios?';
+            return e.returnValue;
+        }
+    });
+}
 
 function loadProjects() {
     try {
@@ -6263,8 +6630,80 @@ function loadProjects() {
 function saveProjects() {
     try {
         localStorage.setItem('flowforge-projects', JSON.stringify(state.projects));
+        // Marcar como guardado
+        state.hasUnsavedChanges = false;
+        state.lastSavedState = JSON.stringify(state.projects);
+        updateSaveButtonState();
     } catch (error) {
         console.error('Error saving projects:', error);
+    }
+}
+
+// Marcar que hay cambios sin guardar (llamar cuando se modifica algo)
+function markUnsavedChanges() {
+    state.hasUnsavedChanges = true;
+    updateSaveButtonState();
+}
+
+// Actualizar estado visual del botón guardar
+function updateSaveButtonState() {
+    const saveBtn = document.getElementById('saveBtn');
+    if (saveBtn) {
+        if (state.hasUnsavedChanges) {
+            saveBtn.classList.add('has-changes');
+            saveBtn.title = '¡Hay cambios sin guardar!';
+        } else {
+            saveBtn.classList.remove('has-changes');
+            saveBtn.title = 'Guardar proyecto';
+        }
+    }
+}
+
+// Verificar si hay cambios sin guardar antes de salir
+function checkUnsavedChangesBeforeAction(callback, actionName = 'continuar') {
+    if (state.hasUnsavedChanges) {
+        const result = confirmWithSaveOption(actionName);
+        if (result === 'save') {
+            // Guardar y luego ejecutar callback
+            saveCurrentProject();
+            callback();
+        } else if (result === 'nosave') {
+            // Ejecutar sin guardar
+            state.hasUnsavedChanges = false; // Resetear para no preguntar de nuevo
+            callback();
+        }
+        // Si result === 'cancel', no hacer nada
+    } else {
+        callback();
+    }
+}
+
+// Confirmar con opción de guardar
+function confirmWithSaveOption(actionName = 'continuar') {
+    // Primera pregunta: ¿Quieres guardar?
+    const wantToSave = confirm(
+        `⚠️ TIENES CAMBIOS SIN GUARDAR\n\n` +
+        `¿Deseas GUARDAR los cambios antes de ${actionName}?\n\n` +
+        `• Presiona ACEPTAR para GUARDAR y ${actionName}\n` +
+        `• Presiona CANCELAR para continuar sin guardar`
+    );
+    
+    if (wantToSave) {
+        return 'save'; // Guardar y continuar
+    } else {
+        // Segunda pregunta: Confirmar que realmente quiere salir sin guardar
+        const confirmNoSave = confirm(
+            `⚠️ CONFIRMA TU DECISIÓN\n\n` +
+            `Estás a punto de ${actionName} SIN GUARDAR.\n` +
+            `Los cambios realizados se PERDERÁN.\n\n` +
+            `• Presiona ACEPTAR para salir SIN GUARDAR\n` +
+            `• Presiona CANCELAR para volver y guardar`
+        );
+        if (confirmNoSave) {
+            return 'nosave'; // Salir sin guardar
+        } else {
+            return 'cancel'; // Cancelar acción y volver
+        }
     }
 }
 
@@ -6336,12 +6775,47 @@ function setupGlobalEventListeners() {
         }
     });
     
+    // Detectar cambios en campos del proyecto
+    setupChangeDetection();
+    
     // Initial prompt update if project exists
     setTimeout(() => {
         if (app && app.currentProject) {
             updatePromptOutput();
         }
     }, 100);
+}
+
+// Configurar detección de cambios en campos editables
+function setupChangeDetection() {
+    // Lista de IDs de campos que al cambiar marcan como "no guardado"
+    const trackedFields = [
+        'whatIs', 'targetAudience', 'needsSolved', 'differentiators', 
+        'elevatorPitch', 'appType', 'uiComponents', 'metricsDetail', 'mainFeatures'
+    ];
+    
+    trackedFields.forEach(fieldId => {
+        const field = document.getElementById(fieldId);
+        if (field) {
+            field.addEventListener('input', () => {
+                if (state.currentProjectId) {
+                    markUnsavedChanges();
+                }
+            });
+        }
+    });
+    
+    // También detectar cambios en cualquier textarea dentro de projectView
+    const projectView = document.getElementById('projectView');
+    if (projectView) {
+        projectView.addEventListener('input', (e) => {
+            if (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT') {
+                if (state.currentProjectId) {
+                    markUnsavedChanges();
+                }
+            }
+        });
+    }
 }
 
 function switchTab(tabId) {
@@ -6351,6 +6825,13 @@ function switchTab(tabId) {
     document.querySelectorAll('.tab-content').forEach(content => {
         content.classList.toggle('active', content.id === `tab-${tabId}`);
     });
+    
+    // Populate preview selectors when preview tab is activated
+    if (tabId === 'preview') {
+        setTimeout(() => {
+            populatePreviewSelectors();
+        }, 50);
+    }
 }
 
 function switchTier(tier) {
@@ -6393,7 +6874,19 @@ function updatePromptOutput() {
         project = app.currentProject;
     }
     if (!project) {
-        promptOutput.textContent = 'No hay proyecto seleccionado';
+        promptOutput.innerHTML = `<div style="text-align: center; padding: 40px 20px; color: var(--text-muted);">
+            <p style="font-size: 1.1rem; margin-bottom: 8px;">No hay proyecto seleccionado</p>
+            <p style="font-size: 0.9rem;">Crea o carga un proyecto para generar prompts</p>
+        </div>`;
+        return;
+    }
+
+    // Si no hay secciones seleccionadas, mostrar mensaje vacío
+    if (!state.selectedPromptSections || state.selectedPromptSections.length === 0) {
+        promptOutput.innerHTML = `<div style="text-align: center; padding: 40px 20px; color: var(--text-muted);">
+            <p style="font-size: 1.1rem; margin-bottom: 8px;">👆 Selecciona las secciones que deseas incluir</p>
+            <p style="font-size: 0.9rem;">El prompt se generará automáticamente con el contenido seleccionado</p>
+        </div>`;
         return;
     }
 
@@ -6434,7 +6927,14 @@ function updatePromptOutput() {
 function formatFlowsForPrompt(flows, tier = null) {
     if (!flows) return '';
     
-    let result = '';
+    let result = '⚠️ REGLA CRÍTICA DE IDIOMA ⚠️\n';
+    result += '═'.repeat(50) + '\n';
+    result += 'TODO el contenido debe estar 100% en ESPAÑOL.\n';
+    result += 'PROHIBIDO usar palabras en inglés en textos UI.\n';
+    result += 'Ejemplos CORRECTOS: "Inicio", "Buscar", "Perfil", "Configuración"\n';
+    result += 'Ejemplos INCORRECTOS: "Home", "Search", "Profile", "Settings"\n';
+    result += '═'.repeat(50) + '\n';
+    
     const tiers = tier ? [tier] : ['mvp', 'intermediate', 'complete'];
     
     tiers.forEach(t => {
@@ -6480,6 +6980,30 @@ function formatFlowsForPrompt(flows, tier = null) {
                     result += `      Acceso: ${flow.navigation.accessFrom}\n`;
                 }
                 
+                // Interacciones
+                if (flow.interactions && flow.interactions.length > 0) {
+                    result += `   \n   👆 Interacciones:\n`;
+                    flow.interactions.forEach(interaction => {
+                        result += `      • ${interaction}\n`;
+                    });
+                }
+                
+                // Gestión de Estado
+                if (flow.stateManagement) {
+                    result += `   \n   📊 Gestión de Estado:\n`;
+                    result += `      Loading: ${flow.stateManagement.loading ? '✓' : '✗'} | `;
+                    result += `Empty: ${flow.stateManagement.empty ? '✓' : '✗'} | `;
+                    result += `Error: ${flow.stateManagement.error ? '✓' : '✗'}\n`;
+                }
+                
+                // Accesibilidad
+                if (flow.accessibilityNotes && flow.accessibilityNotes.length > 0) {
+                    result += `   \n   ♿ Notas de Accesibilidad:\n`;
+                    flow.accessibilityNotes.forEach(note => {
+                        result += `      • ${note}\n`;
+                    });
+                }
+                
                 result += `\n`;
             });
         }
@@ -6523,19 +7047,36 @@ function formatGeneralRulesForPrompt(generalRules) {
     
     let result = '';
     
-    // Idioma
+    // Idioma - ADVERTENCIA CRÍTICA PRIMERO
     if (generalRules.language) {
-        result += '\n### 🌍 Idioma Oficial\n';
-        result += `Principal: ${generalRules.language.primary}\n`;
+        result += '\n### 🚨 IDIOMA - REGLA CRÍTICA 🚨\n';
+        result += `\n⚠️ ${generalRules.language.critical || 'TODO el contenido debe estar en ESPAÑOL'}\n\n`;
+        result += `Idioma Principal: ${generalRules.language.primary}\n`;
+        
+        if (generalRules.language.prohibited && generalRules.language.prohibited.length > 0) {
+            result += '\n❌ PALABRAS PROHIBIDAS (usar equivalente en español):\n';
+            generalRules.language.prohibited.forEach(prohibition => {
+                result += `   ${prohibition}\n`;
+            });
+        }
+        
         if (generalRules.language.localization) {
-            result += `Formato fechas: ${generalRules.language.localization.dateFormat}\n`;
+            result += `\nFormato fechas: ${generalRules.language.localization.dateFormat}\n`;
             result += `Formato números: ${generalRules.language.localization.numberFormat}\n`;
         }
+        
         if (generalRules.language.rules) {
-            result += '\nReglas de idioma:\n';
+            result += '\n✅ Reglas obligatorias:\n';
             generalRules.language.rules.forEach(rule => {
                 result += `   • ${rule}\n`;
             });
+        }
+        
+        if (generalRules.language.validation) {
+            result += `\n🔍 Validación final: ${generalRules.language.validation.check}\n`;
+            if (generalRules.language.validation.exception) {
+                result += `   Excepción: ${generalRules.language.validation.exception}\n`;
+            }
         }
     }
     
@@ -6682,13 +7223,183 @@ function setupAPIKeyAutosave() {
     });
 }
 
+// ========== NAVIGATION SYSTEM ==========
+const navigationHistory = [];
+let currentNavigationIndex = -1;
+
+function pushNavigationState(stateName) {
+    // Eliminar estados posteriores si estamos en medio del historial
+    if (currentNavigationIndex < navigationHistory.length - 1) {
+        navigationHistory.splice(currentNavigationIndex + 1);
+    }
+    
+    // Agregar nuevo estado
+    navigationHistory.push({
+        name: stateName,
+        projectId: state.currentProjectId,
+        timestamp: Date.now()
+    });
+    
+    currentNavigationIndex = navigationHistory.length - 1;
+    updateNavigationButtons();
+}
+
+function navigateBack() {
+    if (currentNavigationIndex <= 0) {
+        // Si no hay historial, ir al inicio
+        goToHome();
+        return;
+    }
+    
+    currentNavigationIndex--;
+    const prevState = navigationHistory[currentNavigationIndex];
+    
+    if (prevState) {
+        restoreNavigationState(prevState);
+    }
+    
+    updateNavigationButtons();
+}
+
+function restoreNavigationState(navState) {
+    if (navState.name === 'home' || navState.name === 'welcome') {
+        showWelcomeScreen();
+    } else if (navState.name === 'newProject') {
+        showProjectForm();
+    } else if (navState.name === 'project' && navState.projectId) {
+        const project = state.projects.find(p => p.id === navState.projectId);
+        if (project) {
+            loadProject(project.id);
+        } else {
+            goToHome();
+        }
+    } else if (navState.name === 'overview' && navState.projectId) {
+        const project = state.projects.find(p => p.id === navState.projectId);
+        if (project) {
+            showOverviewSection(project);
+        }
+    }
+}
+
+function goToHome() {
+    // Verificar si hay cambios sin guardar
+    if (state.hasUnsavedChanges) {
+        const result = confirmWithSaveOption('ir al inicio');
+        if (result === 'save') {
+            saveCurrentProject();
+        } else if (result === 'cancel') {
+            return; // No hacer nada
+        }
+        // Si result === 'nosave', continuar sin guardar
+    }
+    
+    // Limpiar estado actual
+    state.currentProjectId = null;
+    state.hasUnsavedChanges = false;
+    
+    // Mostrar pantalla de bienvenida
+    showWelcomeScreen();
+    
+    // Actualizar header
+    const headerTitle = document.getElementById('headerTitle');
+    if (headerTitle) {
+        headerTitle.textContent = 'Bienvenido a FlowForge';
+    }
+    
+    // Ocultar botones de proyecto
+    hideProjectButtons();
+    
+    // Agregar al historial
+    pushNavigationState('home');
+    
+    if (app) {
+        app.showNotification('🏠 Inicio', 'info', null, 1500);
+    }
+}
+
+function showWelcomeScreen() {
+    const welcomeScreen = document.getElementById('welcomeScreen');
+    const projectForm = document.getElementById('projectForm');
+    const projectView = document.getElementById('projectView');
+    const overviewSection = document.getElementById('overviewSection');
+    const mainTabs = document.getElementById('mainTabs');
+    const promptBuilder = document.getElementById('promptBuilder');
+    
+    if (welcomeScreen) welcomeScreen.style.display = 'flex';
+    if (projectForm) projectForm.style.display = 'none';
+    if (projectView) projectView.style.display = 'none';
+    if (overviewSection) overviewSection.style.display = 'none';
+    if (mainTabs) mainTabs.style.display = 'none';
+    if (promptBuilder) promptBuilder.style.display = 'none';
+}
+
+function showProjectForm() {
+    const welcomeScreen = document.getElementById('welcomeScreen');
+    const projectForm = document.getElementById('projectForm');
+    const projectView = document.getElementById('projectView');
+    
+    if (welcomeScreen) welcomeScreen.style.display = 'none';
+    if (projectForm) projectForm.style.display = 'block';
+    if (projectView) projectView.style.display = 'none';
+}
+
+function showOverviewSection(project) {
+    const projectView = document.getElementById('projectView');
+    const overviewSection = document.getElementById('overviewSection');
+    const mainTabs = document.getElementById('mainTabs');
+    const promptBuilder = document.getElementById('promptBuilder');
+    
+    if (projectView) projectView.style.display = 'block';
+    if (overviewSection) overviewSection.style.display = 'block';
+    if (mainTabs) mainTabs.style.display = 'none';
+    if (promptBuilder) promptBuilder.style.display = 'none';
+    
+    populateOverview(project);
+}
+
+function hideProjectButtons() {
+    const saveBtn = document.getElementById('saveBtn');
+    const exportBtn = document.getElementById('exportBtn');
+    const shareBtn = document.getElementById('shareBtn');
+    const versionsBtn = document.getElementById('versionsBtn');
+    
+    if (saveBtn) saveBtn.style.display = 'none';
+    if (exportBtn) exportBtn.style.display = 'none';
+    if (shareBtn) shareBtn.style.display = 'none';
+    if (versionsBtn) versionsBtn.style.display = 'none';
+}
+
+function updateNavigationButtons() {
+    const backBtn = document.getElementById('navBackBtn');
+    
+    if (backBtn) {
+        // Deshabilitar si estamos en el inicio o no hay historial
+        const canGoBack = currentNavigationIndex > 0 || state.currentProjectId;
+        backBtn.disabled = !canGoBack;
+    }
+}
+
 // Global functions for HTML onclick handlers
 function createNewProject() {
+    // Verificar si hay cambios sin guardar
+    if (state.hasUnsavedChanges) {
+        if (!confirm('⚠️ Tienes cambios sin guardar.\\n\\n¿Deseas crear un nuevo proyecto sin guardar?')) {
+            return;
+        }
+    }
+    
     const welcomeScreen = document.getElementById('welcomeScreen');
     const projectForm = document.getElementById('projectForm');
     
     if (welcomeScreen) welcomeScreen.style.display = 'none';
     if (projectForm) projectForm.style.display = 'block';
+    
+    // Resetear estado de cambios
+    state.hasUnsavedChanges = false;
+    updateSaveButtonState();
+    
+    // Agregar al historial de navegación
+    pushNavigationState('newProject');
     
     // Setup real-time validation
     setupFormValidation();
@@ -7056,19 +7767,28 @@ async function regenerateWithFocus() {
     const project = state.projects.find(p => p.id === state.currentProjectId);
     if (!project) return;
     
-    if (!confirm('¿Regenerar el proyecto enfocándote más en tu descripción original?\n\nEsto mantendrá los conceptos clave de tu descripción y evitará agregar funcionalidades no solicitadas.')) {
+    if (!confirm('¿Regenerar el proyecto enfocándote más en tu descripción original?\n\nEsto analizará tu descripción y generará contenido que refleje exactamente tus palabras clave y conceptos.')) {
         return;
     }
     
-    // Show loading
-    const alignmentPanel = document.querySelector('[style*="alignment"]');
-    if (alignmentPanel) {
-        alignmentPanel.innerHTML = `
-            <div style="text-align: center; padding: 40px;">
-                <div style="font-size: 2rem; margin-bottom: 16px;">⏳</div>
-                <div style="color: var(--text-primary); font-weight: 500;">Regenerando con mayor foco...</div>
-                <div style="color: var(--text-muted); font-size: 0.85rem; margin-top: 8px;">Analizando tu descripción original</div>
+    // Show loading in overview section
+    const overviewContent = document.getElementById('overviewContent');
+    if (overviewContent) {
+        overviewContent.innerHTML = `
+            <div style="text-align: center; padding: 60px 20px;">
+                <div style="font-size: 3rem; margin-bottom: 20px;">🔄</div>
+                <div style="color: var(--text-primary); font-weight: 600; font-size: 1.2rem; margin-bottom: 8px;">Regenerando con Mayor Foco...</div>
+                <div style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 20px;">Analizando tu descripción original y extrayendo conceptos clave</div>
+                <div style="width: 200px; height: 4px; background: var(--bg-tertiary); border-radius: 2px; margin: 0 auto; overflow: hidden;">
+                    <div style="width: 30%; height: 100%; background: var(--accent-primary); border-radius: 2px; animation: loading 1.5s infinite;"></div>
+                </div>
             </div>
+            <style>
+                @keyframes loading {
+                    0% { transform: translateX(-100%); }
+                    100% { transform: translateX(400%); }
+                }
+            </style>
         `;
     }
     
@@ -7078,59 +7798,144 @@ async function regenerateWithFocus() {
         const category = project.category;
         const description = project.expandedDescription || project.description;
         
+        // Extraer conceptos clave de la descripción original
+        const keywordsFromDescription = extractKeywordsFromDescription(description);
+        
         let newData;
         
         if (apiKey) {
-            // Regenerar con API usando prompt más estricto
-            newData = await generateProjectDataWithFocus(name, category, description, apiKey);
+            // Regenerar con API usando prompt enfocado en los conceptos extraídos
+            newData = await generateProjectDataWithFocus(name, category, description, keywordsFromDescription, apiKey);
         } else {
-            // Regenerar localmente de forma más conservadora
-            newData = generateProjectData(name, category, description);
-            // Mantener solo conceptos de la descripción original
-            newData = filterToOriginalConcepts(newData, description);
+            // Regenerar localmente pero de forma inteligente
+            newData = generateFocusedProjectDataLocally(name, category, description, keywordsFromDescription);
         }
         
         // Actualizar proyecto
         project.data = newData;
         project.updatedAt = new Date().toISOString();
         
-        saveProjects();
+        // Marcar como cambios pendientes (no guardar automáticamente)
+        markUnsavedChanges();
         
         // Refrescar vista
         populateOverview(project);
         
         if (app) {
-            app.showNotification('Proyecto regenerado con mayor alineación', 'success');
+            app.showNotification('✓ Proyecto regenerado con mayor alineación a tu descripción', 'success');
         }
     } catch (error) {
         console.error('Error regenerating:', error);
         if (app) {
-            app.showNotification('Error al regenerar. Intenta ajustar manualmente.', 'error');
+            app.showNotification('Error al regenerar. Intenta de nuevo.', 'error');
         }
         // Restaurar vista
         populateOverview(project);
     }
 }
 
-async function generateProjectDataWithFocus(name, category, description, apiKey) {
-    const enhancedPrompt = `IMPORTANTE: MANTENTE ESTRICTAMENTE FIEL a la descripción proporcionada.
+function extractKeywordsFromDescription(description) {
+    // Stopwords en español
+    const stopwords = new Set([
+        'el', 'la', 'los', 'las', 'un', 'una', 'unos', 'unas', 'de', 'del', 'al',
+        'en', 'con', 'por', 'para', 'que', 'es', 'son', 'ser', 'está', 'están',
+        'como', 'más', 'muy', 'pero', 'sin', 'sobre', 'entre', 'cada', 'todo',
+        'todos', 'toda', 'todas', 'este', 'esta', 'estos', 'estas', 'ese', 'esa',
+        'esos', 'esas', 'aquel', 'aquella', 'y', 'o', 'ni', 'si', 'no', 'se',
+        'su', 'sus', 'mi', 'mis', 'tu', 'tus', 'lo', 'le', 'les', 'me', 'te',
+        'nos', 'os', 'hay', 'ha', 'han', 'he', 'has', 'hemos', 'hacer', 'hace',
+        'cuando', 'donde', 'quien', 'cual', 'cuyo', 'porque', 'aunque', 'sino',
+        'mientras', 'mediante', 'según', 'hacia', 'hasta', 'desde', 'durante',
+        'través', 'así', 'también', 'además', 'etc', 'the', 'and', 'for', 'with'
+    ]);
+    
+    // Limpiar y tokenizar
+    const words = description.toLowerCase()
+        .replace(/[^\wáéíóúüñ\s]/g, ' ')
+        .split(/\s+/)
+        .filter(w => w.length > 2 && !stopwords.has(w));
+    
+    // Contar frecuencia
+    const frequency = {};
+    words.forEach(word => {
+        frequency[word] = (frequency[word] || 0) + 1;
+    });
+    
+    // Extraer keywords principales (frecuencia > 1 o palabras largas)
+    const keywords = Object.entries(frequency)
+        .filter(([word, count]) => count > 1 || word.length > 6)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 20)
+        .map(([word]) => word);
+    
+    // Extraer frases clave (bigramas)
+    const bigrams = [];
+    for (let i = 0; i < words.length - 1; i++) {
+        if (!stopwords.has(words[i]) && !stopwords.has(words[i + 1])) {
+            bigrams.push(`${words[i]} ${words[i + 1]}`);
+        }
+    }
+    
+    // Extraer conceptos específicos (sustantivos compuestos comunes)
+    const conceptPatterns = [
+        /calendario\s+\w+/gi,
+        /gestión\s+de\s+\w+/gi,
+        /seguimiento\s+de\s+\w+/gi,
+        /\w+\s+interactivo/gi,
+        /\w+\s+de\s+tareas/gi,
+        /equipos?\s+de\s+trabajo/gi,
+        /estilo\s+\w+/gi,
+        /tema\s+\w+/gi
+    ];
+    
+    const concepts = [];
+    conceptPatterns.forEach(pattern => {
+        const matches = description.match(pattern);
+        if (matches) {
+            concepts.push(...matches.map(m => m.toLowerCase()));
+        }
+    });
+    
+    return {
+        keywords: [...new Set(keywords)],
+        bigrams: [...new Set(bigrams)].slice(0, 10),
+        concepts: [...new Set(concepts)],
+        originalDescription: description
+    };
+}
 
-=== REGLAS DE NO DESVIACIÓN ===
-1. USA las MISMAS palabras clave de la descripción
-2. EXPANDE solo los conceptos YA mencionados
-3. NO inventes funcionalidades adicionales
-4. MANTÉN el alcance definido por el usuario
-5. Si algo no está mencionado, NO lo agregues
+async function generateProjectDataWithFocus(name, category, description, extractedKeywords, apiKey) {
+    const keywordsList = extractedKeywords.keywords.join(', ');
+    const conceptsList = extractedKeywords.concepts.join(', ');
+    
+    const focusedPrompt = `Eres un experto en UX/UI. Tu tarea es generar especificaciones para una aplicación basándote ESTRICTAMENTE en la descripción del usuario.
 
-=== DESCRIPCIÓN ORIGINAL (FUENTE DE VERDAD) ===
-${description}
+=== REGLAS CRÍTICAS DE FIDELIDAD ===
+1. DEBES usar estas palabras clave que el usuario mencionó: ${keywordsList}
+2. DEBES incluir estos conceptos específicos: ${conceptsList || 'ninguno específico'}
+3. NO inventes funcionalidades que el usuario NO mencionó
+4. Cada feature debe poder rastrearse a algo mencionado en la descripción
+5. Mantén el ALCANCE exacto definido por el usuario
 
-=== TU TAREA ===
-Genera un análisis que:
-- Refleje EXACTAMENTE lo que el usuario describió
-- Use terminología consistente con la descripción
-- No agregue características no solicitadas
-- Priorice los conceptos explícitamente mencionados`;
+=== DESCRIPCIÓN DEL USUARIO (FUENTE DE VERDAD) ===
+Proyecto: ${name}
+Categoría: ${category}
+Descripción: ${description}
+
+=== GENERA ===
+Un JSON con esta estructura exacta:
+{
+  "whatIs": "Descripción usando las palabras clave del usuario",
+  "targetAudience": "Audiencia objetivo mencionada o inferida de la descripción",
+  "needsSolved": "Necesidades que el usuario mencionó explícitamente",
+  "mainFeatures": "• Feature 1 (basado en descripción)\\n• Feature 2\\n• Feature 3",
+  "differentiators": "Lo que hace único basado en lo que el usuario describió",
+  "elevatorPitch": "Pitch usando la terminología exacta del usuario"
+}
+
+IMPORTANTE: Cada campo debe reflejar SOLO lo que el usuario describió. Si algo no está claro, mantente conservador.
+
+Responde SOLO con el JSON, sin explicaciones.`;
 
     try {
         const response = await fetch('https://api.anthropic.com/v1/messages', {
@@ -7143,24 +7948,16 @@ Genera un análisis que:
             },
             body: JSON.stringify({
                 model: 'claude-sonnet-4-20250514',
-                max_tokens: 4000,
+                max_tokens: 2000,
                 messages: [{
                     role: 'user',
-                    content: `${enhancedPrompt}
-
-Genera los datos del proyecto "${name}" (categoría: ${category}) en formato JSON con:
-- whatIs, targetAudience, needsSolved, mainFeatures, competition, businessModel
-- flows (mvp, intermediate, complete)
-- tokens (colors, typography, spacing, borderRadius)
-- metrics
-
-RESPONDE SOLO CON JSON VÁLIDO.`
+                    content: focusedPrompt
                 }]
             })
         });
         
         if (!response.ok) {
-            throw new Error('API error');
+            throw new Error(`API error: ${response.status}`);
         }
         
         const data = await response.json();
@@ -7169,70 +7966,435 @@ RESPONDE SOLO CON JSON VÁLIDO.`
         // Extraer JSON
         const jsonMatch = content.match(/\{[\s\S]*\}/);
         if (jsonMatch) {
-            return JSON.parse(jsonMatch[0]);
+            const aiGeneratedFields = JSON.parse(jsonMatch[0]);
+            
+            // Combinar con datos estructurales generados localmente
+            const baseData = generateProjectData(name, category, description);
+            
+            // Sobrescribir campos de texto con los generados por IA (más focalizados)
+            return {
+                ...baseData,
+                whatIs: aiGeneratedFields.whatIs || baseData.whatIs,
+                targetAudience: aiGeneratedFields.targetAudience || baseData.targetAudience,
+                needsSolved: aiGeneratedFields.needsSolved || baseData.needsSolved,
+                mainFeatures: aiGeneratedFields.mainFeatures || baseData.mainFeatures,
+                differentiators: aiGeneratedFields.differentiators || baseData.differentiators,
+                elevatorPitch: aiGeneratedFields.elevatorPitch || baseData.elevatorPitch
+            };
         }
         
-        throw new Error('No JSON found');
+        throw new Error('No valid JSON in response');
     } catch (error) {
         console.error('API regeneration failed:', error);
-        // Fallback a generación local
-        return generateProjectData(name, category, description);
+        // Fallback inteligente
+        return generateFocusedProjectDataLocally(name, category, description, extractedKeywords);
     }
 }
 
-function filterToOriginalConcepts(data, description) {
-    // Extraer palabras clave de la descripción
-    const descWords = new Set(
-        description.toLowerCase()
-            .split(/\s+/)
-            .filter(w => w.length > 3)
-    );
+function generateFocusedProjectDataLocally(name, category, description, extractedKeywords) {
+    // Generar datos base
+    const baseData = generateProjectData(name, category, description);
     
-    // Filtrar features para mantener solo los relacionados
-    if (data.mainFeatures) {
-        const features = data.mainFeatures.split('\n').filter(f => {
-            const words = f.toLowerCase().split(/\s+/);
-            return words.some(w => descWords.has(w) || w.length > 6);
-        });
-        data.mainFeatures = features.slice(0, 8).join('\n');
+    const keywords = extractedKeywords.keywords;
+    const concepts = extractedKeywords.concepts;
+    
+    // Reformular whatIs usando keywords
+    const keywordsInWhatIs = keywords.slice(0, 5).join(', ');
+    baseData.whatIs = `${name} es una aplicación de ${category} diseñada para ${description.split('.')[0].toLowerCase()}. ` +
+        `Enfocada en: ${keywordsInWhatIs}. ` +
+        `Esta solución permite a los usuarios gestionar de manera eficiente los aspectos clave mencionados en su visión original.`;
+    
+    // Reformular mainFeatures basándose en keywords
+    const focusedFeatures = [];
+    keywords.slice(0, 8).forEach((keyword, i) => {
+        const featureTemplates = [
+            `Sistema de ${keyword} integrado`,
+            `Gestión de ${keyword}`,
+            `${keyword.charAt(0).toUpperCase() + keyword.slice(1)} inteligente`,
+            `Módulo de ${keyword}`,
+            `Herramientas de ${keyword}`,
+            `${keyword.charAt(0).toUpperCase() + keyword.slice(1)} personalizable`,
+            `Control de ${keyword}`,
+            `${keyword.charAt(0).toUpperCase() + keyword.slice(1)} avanzado`
+        ];
+        focusedFeatures.push(`• ${featureTemplates[i % featureTemplates.length]}`);
+    });
+    
+    // Agregar conceptos específicos como features
+    concepts.slice(0, 3).forEach(concept => {
+        focusedFeatures.push(`• ${concept.charAt(0).toUpperCase() + concept.slice(1)}`);
+    });
+    
+    baseData.mainFeatures = focusedFeatures.join('\n');
+    
+    // Reformular needsSolved
+    baseData.needsSolved = `Los usuarios necesitan una solución que les permita:\n` +
+        keywords.slice(0, 5).map(k => `• Gestionar ${k} de manera eficiente`).join('\n') + '\n' +
+        `• Acceder a sus datos desde cualquier dispositivo\n` +
+        `• Colaborar con su equipo de trabajo`;
+    
+    // Reformular differentiators
+    if (concepts.length > 0) {
+        baseData.differentiators = `${name} se diferencia por su enfoque en ${concepts.join(', ')}. ` +
+            `A diferencia de otras soluciones, está diseñado específicamente para ${description.split('.')[0].toLowerCase()}.`;
     }
     
-    return data;
+    // Reformular elevatorPitch
+    baseData.elevatorPitch = `${name} es ${description.split('.')[0]}. ` +
+        `Diseñado para ${category === 'productivity' ? 'profesionales y equipos' : 'usuarios'} que buscan ` +
+        `${keywords.slice(0, 3).join(', ')}. ` +
+        `Simple, efectivo y alineado con tu visión original.`;
+    
+    return baseData;
 }
 
 function adjustGeneration() {
+    console.log('adjustGeneration called, currentProjectId:', state.currentProjectId);
+    
+    // Intentar obtener el proyecto actual de varias fuentes
+    let project = null;
+    
+    if (state.currentProjectId) {
+        project = state.projects.find(p => p.id === state.currentProjectId);
+    }
+    
+    // Fallback: si app tiene el proyecto actual
+    if (!project && app && app.currentProject) {
+        project = app.currentProject;
+        state.currentProjectId = project.id;
+    }
+    
+    // Fallback: buscar el proyecto activo en la lista
+    if (!project) {
+        const activeItem = document.querySelector('.project-item.active');
+        if (activeItem) {
+            const projectId = activeItem.getAttribute('data-id');
+            if (projectId) {
+                project = state.projects.find(p => p.id == projectId);
+                if (project) state.currentProjectId = project.id;
+            }
+        }
+    }
+    
+    if (!project) {
+        console.error('No project found for adjustGeneration');
+        if (app) app.showNotification('Error: No se encontró el proyecto activo', 'error');
+        return;
+    }
+    
+    console.log('Project found:', project.name);
+    
+    // Obtener análisis de alineación actual
+    const userInput = {
+        name: project.name,
+        category: project.category,
+        description: project.expandedDescription || project.description
+    };
+    
+    try {
+        const analysis = AlignmentAnalyzer.analyze(userInput, project.data);
+        console.log('Analysis result:', analysis);
+        
+        // Crear interfaz de ajuste inteligente
+        createSmartAdjustmentInterface(project, analysis);
+    } catch (error) {
+        console.error('Error in AlignmentAnalyzer:', error);
+        if (app) app.showNotification('Error al analizar alineación', 'error');
+    }
+}
+
+function createSmartAdjustmentInterface(project, analysis) {
+    const overviewContent = document.getElementById('overviewContent');
+    if (!overviewContent || !project.data) return;
+    
+    const data = project.data;
+    const missingConcepts = analysis.missing || [];
+    const extraConcepts = analysis.extra || [];
+    
+    // Inicializar set de conceptos seleccionados para integrar
+    window._selectedConceptsToIntegrate = new Set();
+    window._missingConcepts = missingConcepts;
+    window._extraConcepts = extraConcepts;
+    window._activeAdjustmentField = null;
+    
+    // Crear HTML de conceptos faltantes como chips seleccionables
+    const missingChipsHTML = missingConcepts.map(concept => `
+        <button class="concept-chip missing-chip" data-concept="${concept}" onclick="toggleConceptSelection('${concept}')" 
+            style="display: inline-flex; align-items: center; gap: 4px; padding: 6px 12px; margin: 3px; background: rgba(239, 68, 68, 0.15); color: var(--error); border: 1px dashed var(--error); border-radius: 20px; font-size: 0.8rem; cursor: pointer; transition: all 0.2s;">
+            <span class="chip-icon">+</span> ${concept}
+        </button>
+    `).join('');
+    
+    // Crear formulario de edición inteligente
+    overviewContent.innerHTML = `
+        <div class="smart-adjustment-form" style="display: flex; flex-direction: column; gap: 20px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; flex-wrap: wrap; gap: 10px;">
+                <h3 style="color: var(--text-primary); margin: 0; display: flex; align-items: center; gap: 8px;">
+                    <span>🎯</span> Ajuste Inteligente de Alineación
+                </h3>
+                <div style="display: flex; gap: 10px;">
+                    <button onclick="cancelOverviewEdit()" style="padding: 8px 16px; background: var(--bg-tertiary); color: var(--text-secondary); border: 1px solid var(--border-color); border-radius: 6px; cursor: pointer;">
+                        Cancelar
+                    </button>
+                    <button onclick="applyAndSaveAdjustments()" style="padding: 8px 16px; background: var(--accent-primary); color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 500;">
+                        💾 Aplicar y Guardar
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Panel de Conceptos -->
+            ${missingConcepts.length > 0 || extraConcepts.length > 0 ? `
+            <div style="background: var(--bg-secondary); border-radius: 12px; padding: 16px; border: 1px solid var(--border-color);">
+                <div style="font-weight: 600; color: var(--text-primary); margin-bottom: 12px; font-size: 0.9rem;">
+                    📋 Selección de Conceptos a Integrar
+                </div>
+                
+                ${missingConcepts.length > 0 ? `
+                <div style="margin-bottom: 16px;">
+                    <div style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 8px; font-weight: 500;">
+                        <span style="color: var(--error);">✕ Conceptos Faltantes</span> — Click para seleccionar cuáles integrar:
+                    </div>
+                    <div id="missingConceptsContainer" style="display: flex; flex-wrap: wrap; gap: 4px;">
+                        ${missingChipsHTML}
+                    </div>
+                    <div style="margin-top: 10px; display: flex; gap: 8px; align-items: center;">
+                        <button onclick="selectAllMissingConcepts()" style="padding: 4px 10px; background: var(--bg-tertiary); color: var(--text-secondary); border: 1px solid var(--border-color); border-radius: 4px; cursor: pointer; font-size: 0.75rem;">
+                            Seleccionar todos
+                        </button>
+                        <button onclick="clearConceptSelection()" style="padding: 4px 10px; background: var(--bg-tertiary); color: var(--text-secondary); border: 1px solid var(--border-color); border-radius: 4px; cursor: pointer; font-size: 0.75rem;">
+                            Limpiar selección
+                        </button>
+                        <span id="selectionCount" style="font-size: 0.75rem; color: var(--text-muted);">0 seleccionados</span>
+                    </div>
+                </div>
+                ` : ''}
+            </div>
+            ` : ''}
+            
+            <!-- Instrucciones -->
+            <div style="background: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 8px; padding: 12px;">
+                <div style="font-size: 0.85rem; color: var(--accent-primary); font-weight: 500; margin-bottom: 4px;">
+                    📝 Cómo funciona:
+                </div>
+                <ol style="margin: 0; padding-left: 20px; font-size: 0.8rem; color: var(--text-secondary); line-height: 1.6;">
+                    <li>Haz click en los conceptos faltantes que quieras integrar (se marcarán en <span style="color: var(--success);">verde ✓</span>)</li>
+                    <li>Los conceptos seleccionados se agregarán automáticamente a "Características Principales"</li>
+                    <li>También puedes editar los campos directamente</li>
+                    <li>Click en "Aplicar y Guardar" para confirmar los cambios</li>
+                </ol>
+            </div>
+            
+            <!-- Campos Editables -->
+            <div style="display: grid; gap: 16px;">
+                <div class="edit-field">
+                    <label style="display: block; color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 6px; font-weight: 500;">
+                        ¿Qué es?
+                    </label>
+                    <textarea id="edit-whatIs" class="adjustment-field" style="width: 100%; min-height: 80px; padding: 12px; background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 8px; resize: vertical; font-family: inherit; font-size: 0.95rem;">${data.whatIs || ''}</textarea>
+                </div>
+                
+                <div class="edit-field">
+                    <label style="display: block; color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 6px; font-weight: 500;">
+                        Características Principales <span style="color: var(--success); font-size: 0.75rem;">(aquí se agregarán los conceptos seleccionados)</span>
+                    </label>
+                    <textarea id="edit-mainFeatures" class="adjustment-field" style="width: 100%; min-height: 120px; padding: 12px; background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 8px; resize: vertical; font-family: inherit; font-size: 0.95rem;">${data.mainFeatures || ''}</textarea>
+                </div>
+                
+                <div class="edit-field">
+                    <label style="display: block; color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 6px; font-weight: 500;">Necesidades que Resuelve</label>
+                    <textarea id="edit-needsSolved" class="adjustment-field" style="width: 100%; min-height: 80px; padding: 12px; background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 8px; resize: vertical; font-family: inherit; font-size: 0.95rem;">${data.needsSolved || ''}</textarea>
+                </div>
+                
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                    <div class="edit-field">
+                        <label style="display: block; color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 6px; font-weight: 500;">Público Objetivo</label>
+                        <textarea id="edit-targetAudience" class="adjustment-field" style="width: 100%; min-height: 60px; padding: 12px; background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 8px; resize: vertical; font-family: inherit; font-size: 0.95rem;">${data.targetAudience || ''}</textarea>
+                    </div>
+                    
+                    <div class="edit-field">
+                        <label style="display: block; color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 6px; font-weight: 500;">Diferenciadores</label>
+                        <textarea id="edit-differentiators" class="adjustment-field" style="width: 100%; min-height: 60px; padding: 12px; background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 8px; resize: vertical; font-family: inherit; font-size: 0.95rem;">${data.differentiators || ''}</textarea>
+                    </div>
+                </div>
+                
+                <div class="edit-field">
+                    <label style="display: block; color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 6px; font-weight: 500;">Elevator Pitch</label>
+                    <textarea id="edit-elevatorPitch" class="adjustment-field" style="width: 100%; min-height: 60px; padding: 12px; background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 8px; resize: vertical; font-family: inherit; font-size: 0.95rem;">${data.elevatorPitch || ''}</textarea>
+                </div>
+            </div>
+        </div>
+        
+        <style>
+            .adjustment-field:focus {
+                border-color: var(--accent-primary) !important;
+                outline: none;
+                box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+            }
+            .missing-chip {
+                transition: all 0.2s ease;
+            }
+            .missing-chip:hover {
+                transform: scale(1.05);
+            }
+            .missing-chip.selected {
+                background: rgba(34, 197, 94, 0.25) !important;
+                color: var(--success) !important;
+                border-color: var(--success) !important;
+                border-style: solid !important;
+            }
+        </style>
+    `;
+    
+    // Auto-resize textareas
+    overviewContent.querySelectorAll('textarea').forEach(textarea => {
+        autoResizeTextarea(textarea);
+        textarea.addEventListener('input', () => autoResizeTextarea(textarea));
+    });
+    
+    if (app) {
+        app.showNotification('🎯 Selecciona los conceptos faltantes que quieras integrar', 'info');
+    }
+}
+
+// Toggle selección de concepto
+function toggleConceptSelection(concept) {
+    const chip = document.querySelector(`[data-concept="${concept}"].missing-chip`);
+    if (!chip) return;
+    
+    if (window._selectedConceptsToIntegrate.has(concept)) {
+        // Deseleccionar
+        window._selectedConceptsToIntegrate.delete(concept);
+        chip.classList.remove('selected');
+        chip.querySelector('.chip-icon').textContent = '+';
+    } else {
+        // Seleccionar
+        window._selectedConceptsToIntegrate.add(concept);
+        chip.classList.add('selected');
+        chip.querySelector('.chip-icon').textContent = '✓';
+    }
+    
+    updateSelectionCount();
+}
+
+// Seleccionar todos los conceptos faltantes
+function selectAllMissingConcepts() {
+    const missingConcepts = window._missingConcepts || [];
+    missingConcepts.forEach(concept => {
+        if (!window._selectedConceptsToIntegrate.has(concept)) {
+            window._selectedConceptsToIntegrate.add(concept);
+            const chip = document.querySelector(`[data-concept="${concept}"].missing-chip`);
+            if (chip) {
+                chip.classList.add('selected');
+                chip.querySelector('.chip-icon').textContent = '✓';
+            }
+        }
+    });
+    updateSelectionCount();
+}
+
+// Limpiar selección
+function clearConceptSelection() {
+    window._selectedConceptsToIntegrate.clear();
+    document.querySelectorAll('.missing-chip').forEach(chip => {
+        chip.classList.remove('selected');
+        const icon = chip.querySelector('.chip-icon');
+        if (icon) icon.textContent = '+';
+    });
+    updateSelectionCount();
+}
+
+// Actualizar contador de selección
+function updateSelectionCount() {
+    const count = window._selectedConceptsToIntegrate.size;
+    const countEl = document.getElementById('selectionCount');
+    if (countEl) {
+        countEl.textContent = `${count} seleccionado${count !== 1 ? 's' : ''}`;
+        countEl.style.color = count > 0 ? 'var(--success)' : 'var(--text-muted)';
+    }
+}
+
+// Aplicar conceptos seleccionados y guardar
+function applyAndSaveAdjustments() {
     if (!state.currentProjectId) return;
     
     const project = state.projects.find(p => p.id === state.currentProjectId);
     if (!project) return;
     
-    // Aprobar y permitir edición manual
-    project.overviewApproved = true;
-    saveProjects();
+    // Obtener valores actuales de los campos
+    let mainFeatures = document.getElementById('edit-mainFeatures')?.value || '';
     
-    // Mostrar vista de edición
-    const overviewSection = document.getElementById('overviewSection');
-    const mainTabs = document.getElementById('mainTabs');
-    const promptBuilder = document.getElementById('promptBuilder');
+    // Agregar SOLO los conceptos seleccionados a mainFeatures
+    const selectedConcepts = Array.from(window._selectedConceptsToIntegrate || new Set());
     
-    if (overviewSection) overviewSection.style.display = 'none';
-    if (mainTabs) mainTabs.style.display = 'block';
-    if (promptBuilder) promptBuilder.style.display = 'block';
+    if (selectedConcepts.length > 0) {
+        selectedConcepts.forEach(concept => {
+            // Verificar si ya existe en el campo
+            if (!mainFeatures.toLowerCase().includes(concept.toLowerCase())) {
+                mainFeatures += mainFeatures.endsWith('\n') || mainFeatures === '' 
+                    ? `• ${concept.charAt(0).toUpperCase() + concept.slice(1)}\n`
+                    : `\n• ${concept.charAt(0).toUpperCase() + concept.slice(1)}`;
+            }
+        });
+    }
     
-    // Poblar campos
-    populateProjectFields(project.data);
+    // Actualizar el campo de mainFeatures
+    const mainFeaturesField = document.getElementById('edit-mainFeatures');
+    if (mainFeaturesField) {
+        mainFeaturesField.value = mainFeatures;
+    }
     
-    // Cambiar a tab de flujos
-    switchTab('flows');
+    // Obtener todos los valores de los campos
+    const whatIs = document.getElementById('edit-whatIs')?.value;
+    const targetAudience = document.getElementById('edit-targetAudience')?.value;
+    const needsSolved = document.getElementById('edit-needsSolved')?.value;
+    const differentiators = document.getElementById('edit-differentiators')?.value;
+    const elevatorPitch = document.getElementById('edit-elevatorPitch')?.value;
     
-    // Hacer todos los campos editables
-    document.querySelectorAll('.content-block textarea, .content-block input').forEach(el => {
-        el.disabled = false;
-        el.readOnly = false;
-    });
+    // Actualizar datos del proyecto
+    if (whatIs !== undefined) project.data.whatIs = whatIs;
+    if (targetAudience !== undefined) project.data.targetAudience = targetAudience;
+    if (needsSolved !== undefined) project.data.needsSolved = needsSolved;
+    project.data.mainFeatures = mainFeatures;
+    if (differentiators !== undefined) project.data.differentiators = differentiators;
+    if (elevatorPitch !== undefined) project.data.elevatorPitch = elevatorPitch;
+    
+    project.updatedAt = new Date().toISOString();
+    saveProjects(); // Guardado explícito por acción del usuario
+    
+    // Limpiar variables temporales
+    window._selectedConceptsToIntegrate = null;
+    window._missingConcepts = null;
+    window._extraConcepts = null;
+    
+    // Volver a mostrar el overview con el nuevo análisis
+    populateOverview(project);
+    
+    const addedCount = selectedConcepts.length;
+    if (app) {
+        if (addedCount > 0) {
+            app.showNotification(`✓ ${addedCount} concepto${addedCount !== 1 ? 's' : ''} integrado${addedCount !== 1 ? 's' : ''}. Alineación actualizada.`, 'success');
+        } else {
+            app.showNotification('✓ Cambios guardados correctamente', 'success');
+        }
+    }
+}
+
+function cancelOverviewEdit() {
+    if (!state.currentProjectId) return;
+    
+    const project = state.projects.find(p => p.id === state.currentProjectId);
+    if (!project) return;
+    
+    // Limpiar variables temporales
+    window._selectedConceptsToIntegrate = null;
+    window._missingConcepts = null;
+    window._extraConcepts = null;
+    
+    // Volver a mostrar el overview normal sin guardar
+    populateOverview(project);
     
     if (app) {
-        app.showNotification('Modo de edición activado. Ajusta los campos según necesites.', 'info');
+        app.showNotification('Edición cancelada', 'info');
     }
 }
 
@@ -7291,17 +8453,6 @@ function showAlignmentDetails() {
                     <div style="display: flex; flex-wrap: wrap; gap: 8px;">
                         ${analysis.missing.map(k => `<span style="padding: 6px 12px; background: rgba(239, 68, 68, 0.2); color: var(--error); border-radius: 20px; font-size: 0.8rem;">✕ ${k}</span>`).join('')}
                     </div>
-                </div>
-                ` : ''}
-                
-                ${analysis.extra.length > 0 ? `
-                <div style="margin-bottom: 20px;">
-                    <h4 style="margin-bottom: 12px; color: var(--warning);">⚠ Conceptos Adicionales</h4>
-                    <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 12px;">Estos conceptos fueron agregados pero no estaban en tu descripción:</p>
-                    <div style="display: flex; flex-wrap: wrap; gap: 8px;">
-                        ${analysis.extra.map(k => `<span style="padding: 6px 12px; background: rgba(251, 191, 36, 0.2); color: var(--warning); border-radius: 20px; font-size: 0.8rem;">⚠ ${k}</span>`).join('')}
-                    </div>
-                    <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 8px; font-style: italic;">¿Estos conceptos se alinean con tu visión? Si no, considera regenerar o ajustar manualmente.</p>
                 </div>
                 ` : ''}
                 
@@ -7620,50 +8771,409 @@ Responde ÚNICAMENTE con la descripción expandida, sin introducciones, sin mark
 
 function generateLocalExpansion(projectName, shortDesc, category) {
     const categoryInfo = {
-        fintech: 'en el sector financiero y tecnológico',
-        healthtech: 'en el sector de salud y bienestar',
-        edtech: 'en el sector educativo',
-        ecommerce: 'en el comercio electrónico',
-        social: 'en redes sociales y comunidades',
-        productivity: 'en productividad y gestión',
-        entertainment: 'en entretenimiento',
-        travel: 'en viajes y turismo',
-        food: 'en food delivery y gastronomía'
+        fintech: { sector: 'servicios financieros', audience: 'profesionales y empresas del sector financiero', needVerb: 'gestionar operaciones' },
+        healthtech: { sector: 'salud y bienestar', audience: 'usuarios preocupados por su salud', needVerb: 'monitorear indicadores' },
+        edtech: { sector: 'educación', audience: 'estudiantes, educadores e instituciones', needVerb: 'facilitar el aprendizaje' },
+        ecommerce: { sector: 'comercio electrónico', audience: 'comerciantes y compradores online', needVerb: 'optimizar las ventas' },
+        social: { sector: 'redes sociales', audience: 'usuarios que buscan conectar y compartir', needVerb: 'facilitar la interacción' },
+        productivity: { sector: 'productividad', audience: 'profesionales y equipos de trabajo', needVerb: 'optimizar el rendimiento' },
+        entertainment: { sector: 'entretenimiento', audience: 'consumidores de contenido digital', needVerb: 'mejorar la experiencia' },
+        travel: { sector: 'viajes y turismo', audience: 'viajeros y planificadores de viajes', needVerb: 'simplificar la planificación' },
+        food: { sector: 'gastronomía y delivery', audience: 'usuarios de servicios de comida', needVerb: 'agilizar los pedidos' }
     };
     
-    const sector = categoryInfo[category] || 'en su sector';
+    const catInfo = categoryInfo[category] || { sector: 'tecnología', audience: 'usuarios digitales', needVerb: 'resolver necesidades' };
     
-    return `PROYECTO: ${projectName}
+    // Extraer conceptos clave
+    const extractedData = extractConceptsFromDescription(shortDesc, projectName);
+    
+    // Limpiar keywords y conceptos de duplicados
+    const cleanKeywords = [...new Set(extractedData.keywords.filter(k => k.length > 4))].slice(0, 5);
+    const cleanConcepts = [...new Set(extractedData.concepts.map(c => c.trim().toLowerCase()))].slice(0, 4);
+    const actionVerbs = [...new Set(extractedData.verbs)].slice(0, 3);
+    
+    // Determinar enfoque principal
+    const mainConcept = cleanConcepts[0] || cleanKeywords[0] || 'la funcionalidad principal';
+    const targetAudience = extractedData.audience || catInfo.audience;
+    
+    // Generar resumen interpretativo (sin repetir la descripción original)
+    let summary = '';
+    if (cleanConcepts.length >= 2) {
+        const conceptPhrase = cleanConcepts.slice(0, 2).join(' y ');
+        summary = `${projectName} es una solución especializada en ${conceptPhrase}, diseñada específicamente para ${targetAudience}. La plataforma integra estas capacidades en una experiencia unificada que ${catInfo.needVerb} de manera eficiente.`;
+    } else if (actionVerbs.length >= 2) {
+        summary = `${projectName} permite ${actionVerbs.join(', ')}, ofreciendo a ${targetAudience} una herramienta enfocada que centraliza estas operaciones en un solo lugar.`;
+    } else {
+        summary = `${projectName} proporciona una solución del sector ${catInfo.sector}, orientada a ${targetAudience}, con énfasis en ${mainConcept}.`;
+    }
+    
+    // Objetivos estratégicos variados
+    const objectiveTemplates = [
+        { verb: 'Simplificar', prep: 'la gestión de' },
+        { verb: 'Centralizar', prep: 'el control de' },
+        { verb: 'Optimizar', prep: 'el flujo de' },
+        { verb: 'Automatizar', prep: 'procesos de' },
+        { verb: 'Facilitar', prep: 'el acceso a' }
+    ];
+    
+    const objectives = cleanKeywords.slice(0, 3).map((kw, i) => {
+        const template = objectiveTemplates[i % objectiveTemplates.length];
+        return `• ${template.verb} ${template.prep} ${kw}`;
+    }).join('\n') || `• Proporcionar una solución especializada para ${mainConcept}`;
+    
+    // Características distintivas (evitar repetir keywords literalmente)
+    const featureTemplates = [
+        c => `${capitalizeFirst(c)} integrado`,
+        c => `Gestión avanzada de ${c}`,
+        c => `${capitalizeFirst(c)} en tiempo real`,
+        c => `Panel unificado de ${c}`
+    ];
+    
+    const features = cleanConcepts.slice(0, 4).map((c, i) => {
+        const template = featureTemplates[i % featureTemplates.length];
+        return `• ${template(c)}`;
+    }).join('\n') || cleanKeywords.slice(0, 3).map((k, i) => 
+        `• ${objectiveTemplates[i % objectiveTemplates.length].verb} ${k}`
+    ).join('\n');
+    
+    return `${summary}
 
-VISIÓN GENERAL:
-${shortDesc}
+ENFOQUE: ${catInfo.needVerb.charAt(0).toUpperCase() + catInfo.needVerb.slice(1)} para ${targetAudience}.
 
-Este proyecto ${sector} busca crear una solución innovadora que mejore significativamente la experiencia del usuario a través de un diseño intuitivo y funcionalidades bien pensadas.
+OBJETIVOS:
+${objectives}
 
-OBJETIVOS PRINCIPALES:
-• Ofrecer una interfaz de usuario clara y accesible
-• Optimizar los flujos de trabajo clave
-• Garantizar una experiencia fluida y sin fricciones
-• Implementar las mejores prácticas de UX/UI
+CARACTERÍSTICAS:
+${features}
 
-PÚBLICO OBJETIVO:
-Usuarios que buscan una solución eficiente, moderna y fácil de usar ${sector}.
+La aplicación está diseñada para resolver esta necesidad específica sin complejidades innecesarias, concentrándose en entregar valor directo a través de ${mainConcept}.`;
+}
 
-PROBLEMAS QUE RESUELVE:
-• Complejidad en procesos actuales
-• Falta de herramientas especializadas
-• Experiencia de usuario deficiente en alternativas existentes
-• Necesidad de una solución integrada
+// Genera un resumen natural sin repeticiones
+function generateNaturalSummary(extractedData, projectName, originalDesc) {
+    const { keywords, concepts, verbs } = extractedData;
+    
+    // Eliminar duplicados y palabras muy cortas
+    const uniqueKeywords = [...new Set(keywords.filter(k => k.length > 4))].slice(0, 4);
+    const uniqueConcepts = [...new Set(concepts)].slice(0, 3);
+    const actionVerbs = [...new Set(verbs)].slice(0, 3);
+    
+    // Generar resumen interpretativo basado en los conceptos extraídos
+    if (uniqueConcepts.length >= 2) {
+        const mainConcept = uniqueConcepts[0];
+        const secondaryConcept = uniqueConcepts[1];
+        return `${projectName} integra ${mainConcept} con ${secondaryConcept} en una plataforma unificada, eliminando la necesidad de alternar entre múltiples herramientas y simplificando el flujo de trabajo.`;
+    } else if (uniqueKeywords.length >= 3 && actionVerbs.length >= 1) {
+        const keywordPhrase = uniqueKeywords.slice(0, 2).join(' y ');
+        return `${projectName} permite ${actionVerbs[0]} ${keywordPhrase}, centralizando operaciones que tradicionalmente requerirían diferentes sistemas. La plataforma optimiza ${uniqueKeywords[2]} a través de una interfaz cohesiva.`;
+    } else if (actionVerbs.length >= 2) {
+        return `La herramienta permite ${actionVerbs.join(', ')}, proporcionando un entorno integrado que elimina fricciones entre procesos y mejora la eficiencia operativa.`;
+    } else if (uniqueConcepts.length >= 1) {
+        return `${projectName} se especializa en ${uniqueConcepts[0]}, ofreciendo capacidades diseñadas específicamente para este propósito en lugar de adaptaciones de soluciones genéricas.`;
+    }
+    
+    return `${projectName} proporciona una solución especializada que aborda necesidades específicas de manera más efectiva que las alternativas multipropósito.`;
+}
 
-PROPUESTA DE VALOR:
-Una aplicación diseñada desde cero con enfoque en la experiencia del usuario, que combina funcionalidad, estética y usabilidad para crear una solución que destaque en el mercado.
+// Genera una propuesta de valor más elaborada
+function generateValueProposition(extractedData, projectName, catInfo) {
+    const { keywords, concepts } = extractedData;
+    
+    const mainFeature = concepts[0] || keywords[0] || 'funcionalidad principal';
+    const secondaryFeature = concepts[1] || keywords[1] || 'características adicionales';
+    
+    const differentiators = [
+        `enfoque especializado en ${mainFeature}`,
+        `interfaz diseñada específicamente para este propósito`,
+        `sin funcionalidades innecesarias que compliquen la experiencia`
+    ];
+    
+    return `${projectName} se diferencia por su ${differentiators[0]}. A diferencia de herramientas genéricas de ${catInfo.sector}, ofrece una experiencia optimizada con ${differentiators[1]} y ${differentiators[2]}.`;
+}
 
-CARACTERÍSTICAS CLAVE:
-• Diseño responsive y adaptativo
-• Navegación intuitiva
-• Flujos de usuario optimizados
-• Arquitectura de información clara
-• Componentes UI consistentes`;
+// Helper para capitalizar
+function capitalizeFirst(str) {
+    if (!str) return '';
+    return str.charAt(0).toUpperCase() + str.slice(1);
+}
+
+function extractConceptsFromDescription(description, projectName) {
+    // Stopwords en español
+    const stopwords = new Set([
+        'el', 'la', 'los', 'las', 'un', 'una', 'unos', 'unas', 'de', 'del', 'al',
+        'en', 'con', 'por', 'para', 'que', 'es', 'son', 'ser', 'está', 'están',
+        'como', 'más', 'muy', 'pero', 'sin', 'sobre', 'entre', 'cada', 'todo',
+        'todos', 'toda', 'todas', 'este', 'esta', 'estos', 'estas', 'ese', 'esa',
+        'esos', 'esas', 'aquel', 'aquella', 'y', 'o', 'ni', 'si', 'no', 'se',
+        'su', 'sus', 'mi', 'mis', 'tu', 'tus', 'lo', 'le', 'les', 'me', 'te',
+        'nos', 'os', 'hay', 'ha', 'han', 'he', 'has', 'hemos', 'hacer', 'hace',
+        'cuando', 'donde', 'quien', 'cual', 'cuyo', 'porque', 'aunque', 'sino',
+        'mientras', 'mediante', 'según', 'hacia', 'hasta', 'desde', 'durante',
+        'través', 'así', 'también', 'además', 'etc', 'permite', 'permite',
+        'aplicación', 'app', 'sistema', 'plataforma', 'herramienta', 'usuario',
+        'usuarios', 'poder', 'pueden', 'puede', 'manera', 'forma', 'tipo'
+    ]);
+    
+    // Patrones de verbos de acción
+    const actionVerbs = [];
+    const verbPatterns = /\b(gestionar|administrar|organizar|crear|diseñar|compartir|colaborar|seguir|monitorear|analizar|automatizar|optimizar|facilitar|mejorar|conectar|sincronizar|personalizar|programar|planificar|controlar|registrar|visualizar|exportar|importar|integrar|notificar|recordar|buscar|filtrar|ordenar|agrupar|categorizar|etiquetar|archivar|recuperar|calcular|generar|enviar|recibir|publicar|editar|eliminar|duplicar|copiar|mover|asignar|delegar|priorizar|completar|iniciar|pausar|reanudar|cancelar|aprobar|rechazar|comentar|valorar|calificar|reportar|configurar|personalizar)\w*/gi;
+    
+    const verbMatches = description.match(verbPatterns) || [];
+    verbMatches.forEach(v => actionVerbs.push(v.toLowerCase()));
+    
+    // Tokenizar y filtrar
+    const words = description.toLowerCase()
+        .replace(/[^\wáéíóúüñ\s]/g, ' ')
+        .split(/\s+/)
+        .filter(w => w.length > 3 && !stopwords.has(w));
+    
+    // Contar frecuencia
+    const frequency = {};
+    words.forEach(word => {
+        frequency[word] = (frequency[word] || 0) + 1;
+    });
+    
+    // Extraer keywords principales
+    const keywords = Object.entries(frequency)
+        .filter(([word, count]) => count >= 1 && word.length > 4)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 15)
+        .map(([word]) => word);
+    
+    // Extraer conceptos compuestos (bigramas y trigramas)
+    const concepts = [];
+    const conceptPatterns = [
+        /gestión\s+de\s+\w+/gi,
+        /seguimiento\s+de\s+\w+/gi,
+        /control\s+de\s+\w+/gi,
+        /calendario\s+\w+/gi,
+        /\w+\s+interactivo/gi,
+        /\w+\s+personalizado/gi,
+        /panel\s+de\s+\w+/gi,
+        /lista\s+de\s+\w+/gi,
+        /vista\s+de\s+\w+/gi,
+        /modo\s+\w+/gi,
+        /tema\s+\w+/gi,
+        /estilo\s+\w+/gi,
+        /\w+\s+automático/gi,
+        /notificaciones?\s+\w*/gi,
+        /recordatorios?\s+\w*/gi,
+        /equipos?\s+de\s+\w+/gi,
+        /tareas?\s+\w*/gi,
+        /proyectos?\s+\w*/gi,
+        /archivos?\s+\w*/gi,
+        /documentos?\s+\w*/gi,
+        /reportes?\s+\w*/gi,
+        /estadísticas?\s+\w*/gi,
+        /métricas?\s+\w*/gi,
+        /análisis\s+de\s+\w+/gi,
+        /integración\s+con\s+\w+/gi
+    ];
+    
+    conceptPatterns.forEach(pattern => {
+        const matches = description.match(pattern);
+        if (matches) {
+            concepts.push(...matches.map(m => m.toLowerCase().trim()));
+        }
+    });
+    
+    // Detectar audiencia mencionada
+    let audience = null;
+    const audiencePatterns = [
+        /para\s+(profesionales|estudiantes|empresas|equipos|familias|usuarios|personas|trabajadores|emprendedores|freelancers?|desarrolladores|diseñadores|managers?|líderes|directivos)/gi,
+        /(profesionales|estudiantes|empresas|equipos|familias|trabajadores|emprendedores|freelancers?|desarrolladores|diseñadores|managers?|líderes|directivos)\s+que/gi
+    ];
+    
+    for (const pattern of audiencePatterns) {
+        const match = description.match(pattern);
+        if (match) {
+            audience = match[0].replace(/para\s+/i, '').replace(/\s+que/i, '');
+            break;
+        }
+    }
+    
+    // Detectar necesidades mencionadas
+    let needs = null;
+    const needsPatterns = [
+        /necesitan?\s+(.+?)(?:\.|,|$)/gi,
+        /buscan?\s+(.+?)(?:\.|,|$)/gi,
+        /requieren?\s+(.+?)(?:\.|,|$)/gi
+    ];
+    
+    for (const pattern of needsPatterns) {
+        const match = description.match(pattern);
+        if (match && match[1]) {
+            needs = match[1].substring(0, 100);
+            break;
+        }
+    }
+    
+    // No generar summary aquí - se genera mejor en generateNaturalSummary()
+    let summary = '';
+    
+    // Detectar propuesta de valor
+    let valueProposition = null;
+    if (concepts.length > 0) {
+        valueProposition = concepts.slice(0, 2).join(' y ');
+    } else if (keywords.length > 2) {
+        valueProposition = `${keywords[0]} y ${keywords[1]}`;
+    }
+    
+    return {
+        keywords: [...new Set(keywords)],
+        verbs: [...new Set(actionVerbs)],
+        concepts: [...new Set(concepts)],
+        audience,
+        needs,
+        summary,
+        valueProposition
+    };
+}
+
+function generateObjectivesFromKeywords(keywords, verbs) {
+    const objectives = [];
+    const usedTemplates = new Set();
+    
+    // Plantillas variadas para objetivos (evitar repetición)
+    const verbToObjective = {
+        'gestionar': ['Simplificar la gestión de', 'Centralizar el control de', 'Optimizar el manejo de'],
+        'organizar': ['Estructurar de forma clara', 'Ordenar eficientemente', 'Clasificar y priorizar'],
+        'crear': ['Facilitar la creación de', 'Agilizar el diseño de', 'Permitir generar'],
+        'compartir': ['Habilitar el intercambio de', 'Facilitar la distribución de', 'Permitir compartir'],
+        'colaborar': ['Potenciar el trabajo en equipo en', 'Fomentar la colaboración sobre', 'Integrar aportes en'],
+        'seguir': ['Mantener visibilidad sobre', 'Monitorear el estado de', 'Rastrear el progreso de'],
+        'monitorear': ['Supervisar en tiempo real', 'Observar continuamente', 'Controlar el estado de'],
+        'analizar': ['Obtener insights sobre', 'Examinar patrones en', 'Evaluar métricas de'],
+        'automatizar': ['Reducir tareas manuales en', 'Agilizar procesos de', 'Programar acciones para'],
+        'planificar': ['Organizar con anticipación', 'Programar eficazmente', 'Estructurar el plan de'],
+        'visualizar': ['Mostrar de forma clara', 'Presentar visualmente', 'Graficar información de']
+    };
+    
+    // Generar objetivos basados en verbos encontrados
+    verbs.slice(0, 3).forEach((verb, idx) => {
+        const baseVerb = verb.replace(/r$|ar$|er$|ir$|ando$|endo$|iendo$/, '');
+        for (const [key, templates] of Object.entries(verbToObjective)) {
+            if (key.startsWith(baseVerb) || baseVerb.startsWith(key.substring(0, 4))) {
+                const template = templates[idx % templates.length];
+                if (!usedTemplates.has(template)) {
+                    const keyword = keywords[objectives.length] || 'los recursos';
+                    objectives.push(`• ${template} ${keyword}`);
+                    usedTemplates.add(template);
+                }
+                break;
+            }
+        }
+    });
+    
+    // Completar con objetivos basados en keywords (sin usar "Proporcionar gestión eficiente de")
+    if (objectives.length < 3 && keywords.length > 0) {
+        const keywordTemplates = [
+            (kw) => `• Ofrecer herramientas especializadas para ${kw}`,
+            (kw) => `• Centralizar todo lo relacionado con ${kw}`,
+            (kw) => `• Simplificar el acceso a ${kw}`,
+            (kw) => `• Mejorar la experiencia de ${kw}`
+        ];
+        keywords.slice(0, 4 - objectives.length).forEach((keyword, idx) => {
+            objectives.push(keywordTemplates[idx % keywordTemplates.length](keyword));
+        });
+    }
+    
+    // Objetivos por defecto más variados
+    const defaultObjectives = [
+        '• Ofrecer una experiencia intuitiva desde el primer uso',
+        '• Reducir el tiempo necesario para completar tareas',
+        '• Mantener la información sincronizada y segura'
+    ];
+    
+    while (objectives.length < 3) {
+        objectives.push(defaultObjectives[objectives.length]);
+    }
+    
+    return objectives.slice(0, 4).join('\n');
+}
+
+function generateProblemsFromKeywords(keywords, sector) {
+    const problems = [];
+    const usedPatterns = new Set();
+    
+    // Plantillas variadas para problemas
+    const problemPatterns = [
+        (kw) => `Complejidad al manejar ${kw} con herramientas genéricas`,
+        (kw) => `Pérdida de tiempo buscando información sobre ${kw}`,
+        (kw) => `Dificultad para mantener ${kw} actualizado y organizado`,
+        (kw) => `Falta de visibilidad centralizada sobre ${kw}`,
+        (kw) => `Procesos manuales ineficientes relacionados con ${kw}`
+    ];
+    
+    // Generar problemas únicos basados en keywords
+    keywords.slice(0, 3).forEach((keyword, idx) => {
+        const pattern = problemPatterns[idx % problemPatterns.length];
+        const problem = pattern(keyword);
+        if (!usedPatterns.has(problem)) {
+            problems.push(`• ${problem}`);
+            usedPatterns.add(problem);
+        }
+    });
+    
+    // Agregar problema contextual del sector
+    if (problems.length < 4) {
+        problems.push(`• Las soluciones actuales de ${sector} no se adaptan a este caso específico`);
+    }
+    
+    return problems.slice(0, 4).join('\n');
+}
+
+function generateFeaturesFromKeywords(keywords, concepts) {
+    const features = [];
+    const usedFeatures = new Set();
+    
+    // Priorizar conceptos compuestos como features (capitalizar bien)
+    concepts.slice(0, 4).forEach(concept => {
+        const cleanConcept = concept.trim();
+        const capitalizedConcept = cleanConcept.split(' ')
+            .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+            .join(' ');
+        if (!usedFeatures.has(capitalizedConcept.toLowerCase())) {
+            features.push(`• ${capitalizedConcept}`);
+            usedFeatures.add(capitalizedConcept.toLowerCase());
+        }
+    });
+    
+    // Agregar features basados en keywords con plantillas variadas
+    if (features.length < 5) {
+        const featureTemplates = [
+            (kw) => `Panel de ${kw}`,
+            (kw) => `Vista detallada de ${kw}`,
+            (kw) => `Filtros y búsqueda de ${kw}`,
+            (kw) => `Configuración de ${kw}`,
+            (kw) => `Historial de ${kw}`
+        ];
+        
+        keywords.slice(0, 5 - features.length).forEach((keyword, idx) => {
+            const feature = featureTemplates[idx % featureTemplates.length](keyword);
+            if (!usedFeatures.has(feature.toLowerCase())) {
+                features.push(`• ${feature}`);
+                usedFeatures.add(feature.toLowerCase());
+            }
+        });
+    }
+    
+    // Features por defecto más específicos
+    const defaultFeatures = [
+        '• Interfaz adaptativa para móvil y escritorio',
+        '• Sincronización automática en la nube',
+        '• Sistema de notificaciones configurable',
+        '• Exportación en múltiples formatos'
+    ];
+    
+    while (features.length < 4) {
+        const feature = defaultFeatures[features.length];
+        if (!usedFeatures.has(feature.toLowerCase())) {
+            features.push(feature);
+        }
+    }
+    
+    return features.slice(0, 5).join('\n');
 }
 
 // ====================
@@ -7747,68 +9257,93 @@ function generateProjectData(name, category, description) {
     const catData = CATEGORY_DATA[category] || CATEGORY_DATA.other;
     const hasKeyword = (word) => description.toLowerCase().includes(word.toLowerCase());
     
-    // Generate whatIs
-    let whatIsIntro = `${name} es una aplicación`;
-    if (hasKeyword('interactiv')) whatIsIntro += ' interactiva';
-    if (hasKeyword('innovador')) whatIsIntro += ' innovadora';
-    if (hasKeyword('modern')) whatIsIntro += ' moderna';
-    whatIsIntro += ` de ${catData.categoryName}`;
+    // Extraer información de la descripción
+    const sentences = description.split(/[.!?]/).filter(s => s.trim().length > 10);
+    const mainIdea = sentences[0].trim();
+    const cleanMainIdea = mainIdea.charAt(0).toLowerCase() + mainIdea.slice(1);
     
-    if (hasKeyword('equipo')) whatIsIntro += ' enfocada en el trabajo en equipo';
-    else if (hasKeyword('personal')) whatIsIntro += ' para uso personal';
-    else if (hasKeyword('empresa')) whatIsIntro += ' orientada a empresas';
+    // Analizar contexto para mejor redacción
+    let appType = 'aplicación';
+    if (hasKeyword('plataforma')) appType = 'plataforma';
+    else if (hasKeyword('herramienta')) appType = 'herramienta';
+    else if (hasKeyword('sistema')) appType = 'sistema';
+    else if (hasKeyword('servicio')) appType = 'servicio';
     
-    const mainNeed = description.split('.')[0] || description.substring(0, 100);
+    let qualifier = '';
+    if (hasKeyword('interactiv')) qualifier = 'interactiva ';
+    else if (hasKeyword('innovador')) qualifier = 'innovadora ';
+    else if (hasKeyword('modern')) qualifier = 'moderna ';
+    else if (hasKeyword('intelig')) qualifier = 'inteligente ';
     
-    const whatIs = `${whatIsIntro}. ${description}
+    let focus = '';
+    if (hasKeyword('equipo') || hasKeyword('colabora')) focus = ' enfocada en el trabajo colaborativo';
+    else if (hasKeyword('personal')) focus = ' para uso personal';
+    else if (hasKeyword('empresa') || hasKeyword('organización')) focus = ' orientada a organizaciones';
+    else if (hasKeyword('comunidad')) focus = ' diseñada para comunidades';
+    
+    // Generar whatIs sin repetir la descripción completa
+    const interpretedDesc = sentences.length > 1 ? sentences.slice(1).join('. ').trim() : '';
+    const contextPhrase = interpretedDesc ? `\n\n${interpretedDesc}.` : '';
+    
+    const whatIs = `${name} es una ${appType} ${qualifier}de ${catData.categoryName}${focus}, especializada en ${cleanMainIdea}.${contextPhrase}
 
-${name} se enfoca específicamente en ${description.toLowerCase().split('.')[0]}${description.includes('.') ? '' : ', brindando una solución directa y eficiente para esta necesidad'}.
+La solución proporciona las capacidades específicas necesarias para este caso de uso, priorizando efectividad sobre complejidad innecesaria.`;
 
-La aplicación está diseñada con las características específicas que demanda este tipo de herramienta, priorizando la funcionalidad descrita y evitando complejidades innecesarias que distraigan del objetivo principal.`;
-
-    // Generate targetAudience
+    // Generate targetAudience más natural y específico
     let audienceType = catData.targetAudience;
-    if (hasKeyword('profesional')) audienceType = 'profesionales que ' + description.toLowerCase().split('.')[0];
-    else if (hasKeyword('estudiante')) audienceType = 'estudiantes y personas en formación que necesitan ' + description.toLowerCase().split('.')[0];
-    else if (hasKeyword('equipo')) audienceType = 'equipos de trabajo que buscan ' + description.toLowerCase().split('.')[0];
+    let audienceContext = '';
     
-    const targetAudience = `${name} está diseñada para ${audienceType}.
+    if (hasKeyword('profesional')) {
+        audienceType = 'profesionales del sector';
+        audienceContext = 'que necesitan eficiencia en sus tareas diarias';
+    } else if (hasKeyword('estudiante')) {
+        audienceType = 'estudiantes y personas en formación';
+        audienceContext = 'que buscan mejorar su proceso de aprendizaje';
+    } else if (hasKeyword('equipo') || hasKeyword('colabora')) {
+        audienceType = 'equipos de trabajo';
+        audienceContext = 'que requieren coordinación efectiva';
+    } else if (hasKeyword('empresa')) {
+        audienceType = 'organizaciones y empresas';
+        audienceContext = 'que buscan optimizar sus operaciones';
+    } else {
+        audienceContext = 'que valoran soluciones especializadas';
+    }
+    
+    const targetAudience = `${name} está diseñada para ${audienceType} ${audienceContext}.
 
-Los usuarios objetivo valoran las características específicas que ofrece ${name}: ${description.split('.')[0].toLowerCase()}. Son personas que entienden la importancia de herramientas especializadas sobre soluciones genéricas.
+El perfil de usuario ideal busca una herramienta que resuelva su problema específico de manera directa, sin funcionalidades superfluas que compliquen la experiencia. Priorizan efectividad y facilidad de uso sobre opciones genéricas con múltiples propósitos.`;
 
-El perfil de usuario típico busca exactamente lo que ${name} ofrece: una herramienta enfocada, sin funcionalidades innecesarias, que resuelva de manera efectiva la necesidad planteada.`;
+    // Generate needsSolved más conciso y estructurado
+    const need1 = `${capitalizeFirst(cleanMainIdea)}: Resolver la necesidad principal identificada`;
+    const need2 = `${catData.needsBase[0]}: Fundamental para el contexto de ${catData.categoryName}`;
+    const need3 = `${catData.needsBase[1]}: Complementa y refuerza la propuesta principal`;
+    
+    const needsSolved = `${name} aborda tres aspectos clave:
 
-    // Generate needsSolved
-    const needsSolved = `${name} resuelve directamente la necesidad de ${mainNeed.toLowerCase()}.
+1. ${need1}
 
-Necesidades específicas que aborda:
+2. ${need2}
 
-1. ${mainNeed}: Esta es la necesidad central que motivó la creación de ${name}, proporcionando una solución directa y sin complicaciones.
+3. ${need3}
 
-2. ${catData.needsBase[0]}: Aspecto fundamental para usuarios en el sector ${catData.categoryName}.
+La filosofía de diseño se centra en resolver un problema específico de manera excepcional, en lugar de intentar abarcar múltiples casos de uso con resultados mediocres.`;
 
-3. ${catData.needsBase[1]}: Complementa la funcionalidad principal asegurando una experiencia completa.
+    // Generate differentiators con mayor especificidad
+    const differentiators = `${name} se diferencia de alternativas genéricas mediante:
 
-4. ${catData.needsBase[2]}: Garantiza que la solución sea práctica y sostenible en el tiempo.
+1. Especialización: Arquitectura diseñada exclusivamente para ${cleanMainIdea}, permitiendo optimizaciones que las soluciones multipropósito no pueden ofrecer.
 
-La propuesta de valor de ${name} radica en hacer bien una cosa específica, en lugar de intentar hacer todo de manera mediocre.`;
+2. Diseño Centrado en el Usuario: Cada elemento de la interfaz está calibrado para facilitar el flujo de trabajo específico, eliminando opciones que generarían confusión.
 
-    // Generate differentiators
-    const differentiators = `${name} se diferencia por su enfoque especializado:
+3. Eficiencia por Simplificación: La ausencia deliberada de funcionalidades tangenciales reduce la curva de aprendizaje y mejora el rendimiento.
 
-1. Enfoque Específico: Mientras otras aplicaciones intentan ser todo para todos, ${name} se concentra en ${mainNeed.toLowerCase()}, haciéndolo excepcionalmente bien.
+4. Contexto de Uso Optimizado: Las decisiones de diseño responden directamente a las necesidades de ${catData.categoryName}, no a patrones genéricos de UI/UX.`;
 
-2. Diseño Centrado en la Tarea: Cada elemento de la interfaz está pensado para facilitar específicamente la tarea de ${mainNeed.toLowerCase()}.
-
-3. Sin Complejidad Innecesaria: ${name} no incluye funciones que no contribuyan directamente al objetivo principal, resultando en una experiencia más limpia y eficiente.
-
-4. Optimización para el Caso de Uso: Toda decisión técnica y de diseño se toma pensando en el escenario específico de ${description.toLowerCase().split('.')[0]}.`;
-
-    // Generate elevatorPitch
-    const elevatorPitch = `${name} resuelve un problema específico: ${mainNeed.toLowerCase()}. En lugar de ser otra aplicación genérica de ${catData.categoryName}, nos enfocamos exclusivamente en hacer esto de la mejor manera posible. Nuestros usuarios valoran esta especialización porque obtienen exactamente lo que necesitan, sin distracciones ni curvas de aprendizaje innecesarias. ${name} es la herramienta que hace una cosa, pero la hace excepcionalmente bien.`;
+    // Generate elevatorPitch con mayor impacto
+    const elevatorPitch = `${name} existe para resolver un problema concreto: ${cleanMainIdea}. A diferencia de las plataformas genéricas de ${catData.categoryName} que intentan satisfacer múltiples necesidades con resultados mediocres, ${name} se especializa en este caso de uso específico. Esta especialización se traduce en una experiencia más fluida, una curva de aprendizaje reducida y resultados superiores. Para usuarios que priorizan efectividad sobre versatilidad, ${name} representa la solución óptima.`;
 
     // Generate appType
-    const appType = generateAppType(category, description);
+    const appTypeResult = generateAppType(category, description);
     
     // Generate flows
     const flows = generateFlows(name, category);
@@ -7848,7 +9383,7 @@ La propuesta de valor de ${name} radica en hacer bien una cosa específica, en l
         needsSolved,
         differentiators,
         elevatorPitch,
-        appType,
+        appType: appTypeResult,
         flows,
         tokens,
         uiComponents,
@@ -7940,18 +9475,38 @@ class ScreenArchitecture {
         
         return {
             language: {
-                primary: 'Español (es-ES)',
-                fallback: 'Inglés (en-US) como segundo idioma',
+                critical: '⚠️ REGLA CRÍTICA: TODO el contenido generado DEBE estar 100% en ESPAÑOL. PROHIBIDO mezclar inglés con español.',
+                primary: 'Español (es-ES) - OBLIGATORIO',
+                fallback: 'NO usar inglés en ninguna pantalla principal',
+                prohibited: [
+                    '❌ NUNCA usar "Home" → ✅ Usar "Inicio"',
+                    '❌ NUNCA usar "Profile" → ✅ Usar "Perfil"',
+                    '❌ NUNCA usar "Settings" → ✅ Usar "Configuración"',
+                    '❌ NUNCA usar "Search" → ✅ Usar "Buscar"',
+                    '❌ NUNCA usar "Login" → ✅ Usar "Iniciar Sesión"',
+                    '❌ NUNCA usar "Sign Up" → ✅ Usar "Registrarse"',
+                    '❌ NUNCA usar "Dashboard" → ✅ Usar "Panel" o "Tablero"',
+                    '❌ NUNCA mezclar: "Buscar products" → ✅ "Buscar productos"',
+                    '❌ NUNCA mezclar: "Settings de cuenta" → ✅ "Configuración de cuenta"'
+                ],
                 rules: [
-                    'Todo el contenido UI debe estar en español',
+                    '🔴 CRÍTICO: TODO el texto visible debe estar en español sin excepciones',
+                    'Botones: "Guardar", "Cancelar", "Aceptar", "Siguiente", "Anterior"',
+                    'Navegación: "Inicio", "Buscar", "Perfil", "Configuración", "Notificaciones"',
+                    'Formularios: "Nombre", "Email", "Contraseña", "Teléfono", "Dirección"',
                     'Mensajes de error y validación en español',
-                    'Textos de ayuda y tooltips en español',
+                    'Textos de ayuda, tooltips y placeholders en español',
                     'Notificaciones push en español',
                     'Emails transaccionales en español',
+                    'Confirmaciones y alertas en español',
                     'Formateo de fechas: dd/mm/yyyy',
                     'Formateo de números: 1.234,56 (coma decimal)',
                     'Moneda: $ (pesos) o especificar según región'
                 ],
+                validation: {
+                    check: 'Antes de finalizar, verificar que NO haya ninguna palabra en inglés en textos UI',
+                    exception: 'Solo permitido inglés en: nombres de marcas, nombres propios, términos técnicos sin traducción'
+                },
                 localization: {
                     dateFormat: 'dd/MM/yyyy',
                     timeFormat: 'HH:mm (24 horas)',
@@ -7980,28 +9535,38 @@ class ScreenArchitecture {
                         handle: `@${nameLower}`
                     }
                 },
+                languageReminder: `⚠️ RECORDATORIO: Todo el contenido de ${name} debe estar 100% en ESPAÑOL. NO usar palabras en inglés en botones, menús, títulos o descripciones.`,
                 icon: {
-                    rule: 'Ícono representativo y consistente',
+                    rule: `Ícono CONSISTENTE de ${name} en toda la aplicación`,
+                    description: `El logo/ícono de ${name} debe ser EXACTAMENTE EL MISMO en todas las pantallas. NO cambiar el diseño, símbolos o colores entre pantallas.`,
                     usage: [
-                        'App icon: Versión completa con degradado/sombras',
-                        'Favicon: Versión simplificada 16x16, 32x32',
-                        'PWA icons: 192x192, 512x512',
-                        'Touch icons: 180x180 (iOS)',
-                        'Splash screen: Versión animada o estática',
-                        'Notificaciones: Small icon (24x24dp Android)',
-                        'Header: Mini logo 32-40px height'
+                        `App icon: Logo completo de ${name}`,
+                        `Favicon: Logo de ${name} simplificado 16x16, 32x32`,
+                        `PWA icons: Logo de ${name} 192x192, 512x512`,
+                        `Touch icons: Logo de ${name} 180x180 (iOS)`,
+                        `Splash screen: Logo de ${name} (versión animada o estática)`,
+                        `Notificaciones: Logo de ${name} pequeño (24x24dp Android)`,
+                        `Header/App bar: Logo de ${name} 32-40px height`,
+                        `Loading states: Logo de ${name} animado`,
+                        `Empty states: Logo de ${name} en gris claro`,
+                        `Emails: Logo de ${name} en header`
                     ],
+                    consistency: {
+                        critical: `IMPORTANTE: Usar SIEMPRE el mismo logo de ${name}. NO crear logos diferentes para cada pantalla.`,
+                        sameEverywhere: `El logo debe ser idéntico en: Splash, Headers, Login, Perfil, Notificaciones, Emails, App stores`,
+                        onlyScales: `El logo sólo cambia de TAMAÑO, NUNCA de diseño o colores`
+                    },
                     specifications: {
                         style: 'Moderno, minimalista, memorable',
-                        colors: 'Máximo 3 colores principales',
+                        colors: 'Máximo 3 colores principales - SIEMPRE LOS MISMOS',
                         contrast: 'Funciona en fondos claros y oscuros',
                         scalability: 'Legible desde 16x16 hasta 512x512',
-                        uniqueness: 'Distintivo, evita símbolos genéricos'
+                        uniqueness: `Distintivo de ${name}, evita símbolos genéricos`
                     },
                     placement: {
-                        center: 'En splash, login, empty states',
-                        left: 'En headers/app bars',
-                        inline: 'En textos como marca registrada™'
+                        center: `Logo de ${name} en splash, login, empty states`,
+                        left: `Logo de ${name} en headers/app bars`,
+                        inline: `Logo de ${name} en textos como marca registrada™`
                     }
                 },
                 colorScheme: {
@@ -8765,38 +10330,40 @@ function generateFlows(name, category, appType = '') {
     // Generar nombres dinámicos según categoría
     const dynamicScreens = generateDynamicScreenNames(name, category);
     
+    const languageWarning = `⚠️ IDIOMA: Todos los textos deben estar en ESPAÑOL. Ejemplos: "Iniciar Sesión" (no "Login"), "Buscar" (no "Search"), "Configuración" (no "Settings")`;
+    
     const baseFlows = {
         mvp: [
-            { screen: 'Splash / Loading', description: `Pantalla inicial con logo de ${name} y carga de recursos`, elements: ['Logo animado', 'Progress indicator', 'Versión de app'], context: 'Primera impresión - Sin navegación visible' },
-            { screen: 'Onboarding', description: `Introducción al valor de ${name} en 3-4 slides`, elements: ['Ilustraciones', 'Títulos impactantes', 'Dots de progreso', 'Skip button', 'CTA final'], context: 'Educación inicial - Usuario puede saltarlo' },
+            { screen: `Splash / Loading - ${name}`, description: `Pantalla inicial con logo de ${name} y carga de recursos`, elements: [`Logo de ${name} animado`, 'Progress indicator', 'Versión de app'], context: 'Primera impresión - Sin navegación visible', languageNote: languageWarning },
+            { screen: `Onboarding - ${name}`, description: `Introducción al valor de ${name} en 3-4 slides`, elements: ['Ilustraciones', 'Títulos impactantes', 'Dots de progreso', 'Skip button', 'CTA final'], context: 'Educación inicial - Usuario puede saltarlo' },
             { screen: 'Login / Registro', description: 'Autenticación de usuarios', elements: ['Email input', 'Password input', 'Social login buttons', 'Forgot password link', 'Términos y condiciones'], context: 'Autenticación - Sin navegación principal' },
-            { screen: dynamicScreens.home, description: `Vista principal de ${name}`, elements: ['Header con perfil', 'Cards de contenido', 'Quick actions', 'Bottom navigation'], context: 'Pantalla principal - Navegación completa disponible' },
+            { screen: `${dynamicScreens.home} - ${name}`, description: `Vista principal de ${name}`, elements: [`Header con logo de ${name}`, 'Cards de contenido', 'Quick actions', 'Bottom navigation'], context: 'Pantalla principal - Navegación completa disponible' },
             { screen: 'Perfil de Usuario', description: 'Configuración y datos del usuario', elements: ['Avatar', 'Datos personales', 'Preferencias', 'Logout button'], context: 'Gestión de cuenta - Accesible desde navegación principal' }
         ],
         intermediate: [
-            { screen: dynamicScreens.search, description: `Sistema de búsqueda de ${dynamicScreens.contentType}`, elements: ['Search bar', 'Filtros básicos', 'Resultados en lista/grid', 'Historial reciente'], context: 'Discovery - Encontrar contenido' },
-            { screen: dynamicScreens.detail, description: `Vista detallada de ${dynamicScreens.contentType}`, elements: ['Hero image', 'Información completa', 'Actions principales', 'Contenido relacionado'], context: 'Información detallada - Enfoque en un elemento' },
-            { screen: dynamicScreens.feed, description: `${dynamicScreens.feedDescription} de ${name}`, elements: ['Posts/Items en scroll', 'Refresh pull', 'Filtros de contenido', 'Infinite scroll'], context: 'Consumo de contenido - Actualización continua' },
-            { screen: 'Notificaciones', description: 'Centro de notificaciones', elements: ['Lista de notificaciones', 'Filtros por tipo', 'Mark as read', 'Settings rápidos'], context: 'Centro de actividad - Gestión de notificaciones' },
-            { screen: 'Configuración', description: 'Ajustes y preferencias', elements: ['Sections organizadas', 'Preferencias de app', 'Notificaciones', 'Privacidad', 'Cuenta'], context: 'Personalización - Ajustes del usuario' },
-            { screen: dynamicScreens.saved, description: `${dynamicScreens.contentType} guardados`, elements: ['Lista de guardados', 'Organización por categorías', 'Quick access', 'Opciones de compartir'], context: 'Contenido curado - Acceso rápido' },
-            { screen: dynamicScreens.activity, description: `Historial de ${dynamicScreens.activityType}`, elements: ['Timeline de actividad', 'Filtros temporales', 'Estadísticas básicas', 'Clear history'], context: 'Seguimiento - Registro de acciones' },
-            { screen: 'Ayuda / FAQ', description: 'Centro de soporte básico', elements: ['Preguntas frecuentes', 'Search en FAQs', 'Contact support', 'Video tutoriales'], context: 'Soporte - Ayuda al usuario' }
+            { screen: `${dynamicScreens.search} - ${name}`, description: `Sistema de búsqueda de ${dynamicScreens.contentType}`, elements: ['Search bar', 'Filtros básicos', 'Resultados en lista/grid', 'Historial reciente'], context: 'Discovery - Encontrar contenido' },
+            { screen: `${dynamicScreens.detail} - ${name}`, description: `Vista detallada de ${dynamicScreens.contentType}`, elements: ['Hero image', 'Información completa', 'Actions principales', 'Contenido relacionado'], context: 'Información detallada - Enfoque en un elemento' },
+            { screen: `${dynamicScreens.feed} - ${name}`, description: `${dynamicScreens.feedDescription} de ${name}`, elements: ['Posts/Items en scroll', 'Refresh pull', 'Filtros de contenido', 'Infinite scroll'], context: 'Consumo de contenido - Actualización continua' },
+            { screen: `Notificaciones - ${name}`, description: 'Centro de notificaciones', elements: ['Lista de notificaciones', 'Filtros por tipo', 'Mark as read', 'Settings rápidos'], context: 'Centro de actividad - Gestión de notificaciones' },
+            { screen: `Configuración - ${name}`, description: 'Ajustes y preferencias', elements: ['Sections organizadas', 'Preferencias de app', 'Notificaciones', 'Privacidad', 'Cuenta'], context: 'Personalización - Ajustes del usuario' },
+            { screen: `${dynamicScreens.saved} - ${name}`, description: `${dynamicScreens.contentType} guardados`, elements: ['Lista de guardados', 'Organización por categorías', 'Quick access', 'Opciones de compartir'], context: 'Contenido curado - Acceso rápido' },
+            { screen: `${dynamicScreens.activity} - ${name}`, description: `Historial de ${dynamicScreens.activityType}`, elements: ['Timeline de actividad', 'Filtros temporales', 'Estadísticas básicas', 'Clear history'], context: 'Seguimiento - Registro de acciones' },
+            { screen: `Ayuda / FAQ - ${name}`, description: 'Centro de soporte básico', elements: ['Preguntas frecuentes', 'Search en FAQs', 'Contact support', 'Video tutoriales'], context: 'Soporte - Ayuda al usuario' }
         ],
         complete: [
-            { screen: `${dynamicScreens.search} Avanzada`, description: `Motor de búsqueda completo de ${dynamicScreens.contentType} con IA`, elements: ['Search bar con NLP', 'Filtros avanzados', 'Voice search', 'Visual search', 'Saved searches', 'Recommendations'], context: 'Discovery avanzado - Búsqueda inteligente' },
-            { screen: `${dynamicScreens.detail} Detallada`, description: `Información completa de ${dynamicScreens.contentType} con interacciones`, elements: ['Hero media 360°', 'AR preview', 'Reviews verificados', 'Comparador', 'Share suite', 'Related content'], context: 'Detalle inmersivo - Experiencia completa' },
-            { screen: dynamicScreens.create, description: `Herramientas para ${dynamicScreens.createAction}`, elements: ['Form builder', 'Media upload', 'Rich text editor', 'Preview', 'Autosave', 'Publish/Draft', 'Collaborate'], context: 'Creación - Herramientas profesionales' },
-            { screen: dynamicScreens.messaging, description: 'Sistema de mensajería en tiempo real', elements: ['Lista de conversaciones', 'Chat interface', 'Media sharing', 'Reactions', 'Read receipts', 'Group chats', 'Search'], context: 'Comunicación - Mensajería directa' },
-            { screen: 'Centro de Notificaciones Pro', description: 'Gestión inteligente de notificaciones', elements: ['Smart grouping', 'Scheduled digest', 'Channel preferences', 'Snooze', 'Priority inbox', 'Actions rápidas'], context: 'Notificaciones avanzadas - Control total' },
-            { screen: dynamicScreens.analytics, description: `Métricas y estadísticas de ${dynamicScreens.analyticsType}`, elements: ['Usage dashboard', 'Goal tracking', 'Charts interactivos', 'Comparativas', 'Reports exportables', 'Insights AI'], context: 'Analytics - Métricas y tendencias' },
-            { screen: dynamicScreens.social, description: 'Centro de interacciones sociales', elements: ['Following/Followers', 'Activity feed', 'Grupos', 'Events', 'Sharing', 'Mentions', 'Trending'], context: 'Social - Conexión con comunidad' },
-            { screen: 'Configuración Avanzada', description: 'Panel de control completo', elements: ['Settings sections', 'Privacy center', 'Integrations', 'API keys', 'Export data', 'Account health', 'Theme customizer'], context: 'Control avanzado - Configuración total' },
-            { screen: dynamicScreens.library, description: `Organización de ${dynamicScreens.contentType}`, elements: ['Collections', 'Tags', 'Folders', 'Sort/Filter options', 'Bulk actions', 'Search in library'], context: 'Organización - Gestión de contenido' },
-            { screen: dynamicScreens.calendar, description: `Gestión de ${dynamicScreens.calendarType}`, elements: ['Calendar view', 'Event creation', 'Reminders', 'Sync options', 'Recurring events', 'Agenda view'], context: 'Planificación - Gestión temporal' },
-            { screen: 'Centro de Ayuda Pro', description: 'Soporte completo multicanal', elements: ['AI chatbot', 'FAQs dinámicas', 'Video tutorials', 'Live chat', 'Ticket system', 'Community forum', 'Knowledge base'], context: 'Soporte premium - Ayuda completa' },
-            { screen: dynamicScreens.admin, description: `Panel de ${dynamicScreens.adminType}`, elements: ['User management', 'Content moderation', 'Analytics dashboard', 'Settings globales', 'Reports', 'Permissions'], context: 'Administración - Control del sistema' },
-            { screen: 'Integraciones / API', description: 'Conexión con servicios externos', elements: ['Connected apps', 'API configuration', 'Webhooks', 'OAuth connections', 'Sync status', 'Logs'], context: 'Conectividad - Integración externa' }
+            { screen: `${dynamicScreens.search} Avanzada - ${name}`, description: `Motor de búsqueda completo de ${dynamicScreens.contentType} con IA`, elements: ['Search bar con NLP', 'Filtros avanzados', 'Voice search', 'Visual search', 'Saved searches', 'Recommendations'], context: 'Discovery avanzado - Búsqueda inteligente' },
+            { screen: `${dynamicScreens.detail} Detallada - ${name}`, description: `Información completa de ${dynamicScreens.contentType} con interacciones`, elements: ['Hero media 360°', 'AR preview', 'Reviews verificados', 'Comparador', 'Share suite', 'Related content'], context: 'Detalle inmersivo - Experiencia completa' },
+            { screen: `${dynamicScreens.create} - ${name}`, description: `Herramientas para ${dynamicScreens.createAction}`, elements: ['Form builder', 'Media upload', 'Rich text editor', 'Preview', 'Autosave', 'Publish/Draft', 'Collaborate'], context: 'Creación - Herramientas profesionales' },
+            { screen: `${dynamicScreens.messaging} - ${name}`, description: 'Sistema de mensajería en tiempo real', elements: ['Lista de conversaciones', 'Chat interface', 'Media sharing', 'Reactions', 'Read receipts', 'Group chats', 'Search'], context: 'Comunicación - Mensajería directa' },
+            { screen: `Centro de Notificaciones Pro - ${name}`, description: 'Gestión inteligente de notificaciones', elements: ['Smart grouping', 'Scheduled digest', 'Channel preferences', 'Snooze', 'Priority inbox', 'Actions rápidas'], context: 'Notificaciones avanzadas - Control total' },
+            { screen: `${dynamicScreens.analytics} - ${name}`, description: `Métricas y estadísticas de ${dynamicScreens.analyticsType}`, elements: ['Usage dashboard', 'Goal tracking', 'Charts interactivos', 'Comparativas', 'Reports exportables', 'Insights AI'], context: 'Analytics - Métricas y tendencias' },
+            { screen: `${dynamicScreens.social} - ${name}`, description: 'Centro de interacciones sociales', elements: ['Following/Followers', 'Activity feed', 'Grupos', 'Events', 'Sharing', 'Mentions', 'Trending'], context: 'Social - Conexión con comunidad' },
+            { screen: `Configuración Avanzada - ${name}`, description: 'Panel de control completo', elements: ['Settings sections', 'Privacy center', 'Integrations', 'API keys', 'Export data', 'Account health', 'Theme customizer'], context: 'Control avanzado - Configuración total' },
+            { screen: `${dynamicScreens.library} - ${name}`, description: `Organización de ${dynamicScreens.contentType}`, elements: ['Collections', 'Tags', 'Folders', 'Sort/Filter options', 'Bulk actions', 'Search in library'], context: 'Organización - Gestión de contenido' },
+            { screen: `${dynamicScreens.calendar} - ${name}`, description: `Gestión de ${dynamicScreens.calendarType}`, elements: ['Calendar view', 'Event creation', 'Reminders', 'Sync options', 'Recurring events', 'Agenda view'], context: 'Planificación - Gestión temporal' },
+            { screen: `Centro de Ayuda Pro - ${name}`, description: 'Soporte completo multicanal', elements: ['AI chatbot', 'FAQs dinámicas', 'Video tutorials', 'Live chat', 'Ticket system', 'Community forum', 'Knowledge base'], context: 'Soporte premium - Ayuda completa' },
+            { screen: `${dynamicScreens.admin} - ${name}`, description: `Panel de ${dynamicScreens.adminType}`, elements: ['User management', 'Content moderation', 'Analytics dashboard', 'Settings globales', 'Reports', 'Permissions'], context: 'Administración - Control del sistema' },
+            { screen: `Integraciones / API - ${name}`, description: 'Conexión con servicios externos', elements: ['Connected apps', 'API configuration', 'Webhooks', 'OAuth connections', 'Sync status', 'Logs'], context: 'Conectividad - Integración externa' }
         ]
     };
 
@@ -8958,12 +10525,11 @@ function generateProject() {
         // Save to global state
         state.projects.push(project);
         state.currentProjectId = projectId;
-        saveProjects();
+        markUnsavedChanges();
         
         // Also save to app instance
         if (app) {
             app.currentProject = project;
-            app.saveData();
             app.addToHistory(project);
         }
         
@@ -8972,7 +10538,6 @@ function generateProject() {
         const projectView = document.getElementById('projectView');
         const overviewSection = document.getElementById('overviewSection');
         const mainTabs = document.getElementById('mainTabs');
-        const promptBuilder = document.getElementById('promptBuilder');
         const saveBtn = document.getElementById('saveBtn');
         const exportBtn = document.getElementById('exportBtn');
         const shareBtn = document.getElementById('shareBtn');
@@ -8982,7 +10547,6 @@ function generateProject() {
         if (projectView) projectView.style.display = 'block';
         if (overviewSection) overviewSection.style.display = 'block';
         if (mainTabs) mainTabs.style.display = 'none';
-        if (promptBuilder) promptBuilder.style.display = 'none';
         
         // Show header buttons
         if (saveBtn) saveBtn.style.display = 'inline-flex';
@@ -9013,17 +10577,13 @@ function renderAlignmentPanel(analysis, userInput) {
     
     const scoreInfo = AlignmentAnalyzer.getScoreLevel(analysis.score);
     
-    // Generar HTML de keywords comparados
+    // Generar HTML de keywords comparados usando clases CSS
     const matchedHTML = analysis.matched.slice(0, 8).map(kw => 
-        `<span style="display: inline-block; padding: 4px 8px; margin: 2px; background: rgba(34, 197, 94, 0.2); color: var(--success); border-radius: 4px; font-size: 0.75rem;">✓ ${kw}</span>`
+        `<span class="keyword-tag matched">✓ ${kw}</span>`
     ).join('');
     
     const missingHTML = analysis.missing.slice(0, 5).map(kw => 
-        `<span style="display: inline-block; padding: 4px 8px; margin: 2px; background: rgba(239, 68, 68, 0.2); color: var(--error); border-radius: 4px; font-size: 0.75rem;">✕ ${kw}</span>`
-    ).join('');
-    
-    const extraHTML = analysis.extra.slice(0, 5).map(kw => 
-        `<span style="display: inline-block; padding: 4px 8px; margin: 2px; background: rgba(245, 158, 11, 0.2); color: var(--warning); border-radius: 4px; font-size: 0.75rem;">⚠ ${kw}</span>`
+        `<span class="keyword-tag missing">✕ ${kw}</span>`
     ).join('');
     
     // Generar warnings si hay desviación
@@ -9032,9 +10592,9 @@ function renderAlignmentPanel(analysis, userInput) {
     
     if (criticalRecommendations.length > 0) {
         warningsHTML = criticalRecommendations.map(rec => `
-            <div style="display: flex; align-items: flex-start; gap: 12px; padding: 12px; background: rgba(239, 68, 68, 0.1); border-radius: var(--radius-sm); margin-bottom: 12px; border-left: 3px solid var(--error);">
-                <span style="font-size: 1.2rem;">⚠️</span>
-                <div>
+            <div class="deviation-warning">
+                <span class="icon">⚠️</span>
+                <div class="deviation-content">
                     <div style="font-weight: 600; color: var(--error); margin-bottom: 4px;">Posible Desviación Detectada</div>
                     <div style="font-size: 0.85rem; color: var(--text-secondary);">${rec.message}</div>
                 </div>
@@ -9097,26 +10657,19 @@ function renderAlignmentPanel(analysis, userInput) {
                 </div>
             </div>
             
-            <div style="background: var(--bg-secondary); padding: 12px; border-radius: var(--radius-sm);">
-                <div style="margin-bottom: 12px;">
-                    <div style="font-size: 0.8rem; font-weight: 500; color: var(--success); margin-bottom: 8px;">✓ Conceptos Encontrados (${analysis.matched.length})</div>
-                    <div>${matchedHTML || '<span style="color: var(--text-muted); font-size: 0.8rem;">Ninguno</span>'}</div>
-                </div>
-                ${analysis.missing.length > 0 ? `
-                <div style="margin-bottom: 12px;">
-                    <div style="font-size: 0.8rem; font-weight: 500; color: var(--error); margin-bottom: 8px;">✕ Conceptos Faltantes (${analysis.missing.length})</div>
-                    <div>
-                        ${missingHTML}
-                        ${analysis.missing.length > 5 ? `<span style="color: var(--text-muted); font-size: 0.75rem; margin-left: 8px;">+${analysis.missing.length - 5} más</span>` : ''}
+            <div class="keyword-comparison" style="background: var(--bg-secondary); padding: 16px; border-radius: var(--radius-sm); margin-top: 16px;">
+                <div class="keyword-section">
+                    <div class="keyword-section-title" style="font-size: 0.85rem; font-weight: 600; color: var(--success); margin-bottom: 12px;">✓ Conceptos Encontrados (${analysis.matched.length})</div>
+                    <div class="keyword-list" style="display: flex; flex-wrap: wrap; gap: 8px;">
+                        ${matchedHTML || '<span style="color: var(--text-muted); font-size: 0.8rem;">Ninguno</span>'}
                     </div>
                 </div>
-                ` : ''}
-                ${analysis.extra.length > 0 ? `
-                <div>
-                    <div style="font-size: 0.8rem; font-weight: 500; color: var(--warning); margin-bottom: 8px;">⚠ Conceptos Adicionales (${analysis.extra.length})</div>
-                    <div>
-                        ${extraHTML}
-                        ${analysis.extra.length > 5 ? `<span style="color: var(--text-muted); font-size: 0.75rem; margin-left: 8px;">+${analysis.extra.length - 5} más</span>` : ''}
+                ${analysis.missing.length > 0 ? `
+                <div class="keyword-section" style="margin-top: 16px;">
+                    <div class="keyword-section-title" style="font-size: 0.85rem; font-weight: 600; color: var(--error); margin-bottom: 12px;">✕ Conceptos Faltantes (${analysis.missing.length})</div>
+                    <div class="keyword-list" style="display: flex; flex-wrap: wrap; gap: 8px;">
+                        ${missingHTML}
+                        ${analysis.missing.length > 5 ? `<span style="color: var(--text-muted); font-size: 0.75rem; margin-left: 8px;">+${analysis.missing.length - 5} más</span>` : ''}
                     </div>
                 </div>
                 ` : ''}
@@ -9140,9 +10693,6 @@ function renderAlignmentPanel(analysis, userInput) {
                 ` : ''}
                 <button onclick="adjustGeneration()" style="flex: 1; min-width: 140px; padding: 10px 16px; background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: var(--radius-sm); cursor: pointer; font-size: 0.85rem; font-weight: 500; display: flex; align-items: center; justify-content: center; gap: 6px;">
                     🎯 Ajustar Manualmente
-                </button>
-                <button onclick="showAlignmentDetails()" style="flex: 1; min-width: 140px; padding: 10px 16px; background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: var(--radius-sm); cursor: pointer; font-size: 0.85rem; font-weight: 500; display: flex; align-items: center; justify-content: center; gap: 6px;">
-                    🔍 Ver Detalles
                 </button>
             </div>
             ` : `
@@ -9168,9 +10718,9 @@ function populateOverview(project) {
         return div.innerHTML;
     };
     
-    // Analizar alineación si existe input original y el proyecto no ha sido aprobado
+    // Analizar alineación si existe input original y datos generados
     let alignmentHTML = '';
-    if (project.data && project.data.whatIs && !project.overviewApproved) {
+    if (project.data && project.data.whatIs) {
         // Crear userInput para análisis
         const userInput = {
             name: project.name,
@@ -9187,66 +10737,85 @@ function populateOverview(project) {
         }
     }
     
-    // Información de descripción expandida si existe
-    const expandedDescInfo = project.expandedDescription ? `
-        <div style="margin-top: 16px;">
-            <strong style="color: var(--accent-primary); display: block; margin-bottom: 8px;">✨ Descripción Expandida:</strong>
-            <div style="color: var(--text-secondary); font-style: italic; padding: 12px; background: var(--bg-tertiary); border-radius: var(--radius-sm); line-height: 1.6; white-space: pre-wrap;">${escapeHtml(project.expandedDescription)}</div>
-        </div>
-    ` : '';
+    // Determinar si hay datos generados
+    const hasGeneratedData = project.data && project.data.whatIs;
     
-    // Mostrar resultado generado si existe
-    const generatedResultInfo = project.data && project.data.whatIs ? `
-        <div class="content-block" style="margin: 0;">
-            <div class="content-block-header">
-                <span class="content-block-title">🎯 Resultado Generado</span>
-            </div>
-            <div class="content-block-body" style="padding: 16px;">
-                <strong style="color: var(--accent-primary); display: block; margin-bottom: 8px;">¿Qué es?</strong>
-                <p style="color: var(--text-secondary); font-size: 0.9rem; line-height: 1.6; white-space: pre-wrap;">${escapeHtml(project.data.whatIs)}</p>
-                ${project.data.targetAudience ? `
-                <strong style="color: var(--accent-primary); display: block; margin-top: 16px; margin-bottom: 8px;">¿Para quién?</strong>
-                <p style="color: var(--text-secondary); font-size: 0.9rem; line-height: 1.6; white-space: pre-wrap;">${escapeHtml(project.data.targetAudience)}</p>
-                ` : ''}}
-            </div>
-        </div>
-    ` : `
-        <div class="content-block" style="margin: 0;">
-            <div class="content-block-header">
-                <span class="content-block-title">🎯 Vista Previa del Flujo UX/UI</span>
-            </div>
-            <div class="content-block-body" style="padding: 16px;">
-                <p style="color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 16px;">
-                    Se generará un flujo completo basado en tu descripción, incluyendo:
-                </p>
-                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px;">
-                    <div style="padding: 12px; background: var(--bg-tertiary); border-radius: var(--radius-sm); border-left: 3px solid var(--accent-primary);">
-                        <strong style="font-size: 0.9rem;">📝 Descripción</strong>
-                        <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 4px;">Qué es, para quién, necesidades</p>
+    // Construir contenido principal integrado
+    let mainContentHTML = '';
+    
+    if (hasGeneratedData) {
+        // Vista integrada más limpia y estructurada
+        const whatIsLines = (project.data.whatIs || '').split('\n').filter(l => l.trim());
+        const firstParagraph = whatIsLines[0] || '';
+        const restContent = whatIsLines.slice(1).join('\n').trim();
+        
+        mainContentHTML = `
+            <div class="content-block" style="margin: 0;">
+                <div class="content-block-header">
+                    <span class="content-block-title">📋 Resumen del Proyecto</span>
+                </div>
+                <div class="content-block-body" style="padding: 20px;">
+                    <!-- Encabezado con datos básicos -->
+                    <div style="display: flex; gap: 32px; flex-wrap: wrap; margin-bottom: 24px; padding-bottom: 16px; border-bottom: 1px solid var(--border-color);">
+                        <div>
+                            <div style="color: var(--text-muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Proyecto</div>
+                            <div style="color: var(--text-primary); font-weight: 600; font-size: 1.2rem;">${escapeHtml(project.name)}</div>
+                        </div>
+                        <div>
+                            <div style="color: var(--text-muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Categoría</div>
+                            <div style="color: var(--accent-primary); font-weight: 500;">${escapeHtml((project.category || 'general').charAt(0).toUpperCase() + (project.category || 'general').slice(1))}</div>
+                        </div>
+                        ${project.data.targetAudience ? `
+                        <div style="flex: 1; min-width: 200px;">
+                            <div style="color: var(--text-muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Público</div>
+                            <div style="color: var(--text-secondary); font-size: 0.9rem;">${escapeHtml(project.data.targetAudience.split('\n')[0].replace(/^.*diseñada para /i, '').replace(/\.$/, ''))}</div>
+                        </div>
+                        ` : ''}
                     </div>
-                    <div style="padding: 12px; background: var(--bg-tertiary); border-radius: var(--radius-sm); border-left: 3px solid var(--accent-secondary);">
-                        <strong style="font-size: 0.9rem;">📱 Flujos de Pantalla</strong>
-                        <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 4px;">MVP, Intermedio, Completo</p>
+                    
+                    <!-- Tu descripción original -->
+                    <div style="margin-bottom: 24px;">
+                        <div style="color: var(--text-muted); font-size: 0.8rem; font-weight: 500; margin-bottom: 8px; display: flex; align-items: center; gap: 6px;">
+                            <span style="opacity: 0.7;">📝</span> Tu idea original
+                        </div>
+                        <div style="color: var(--text-primary); font-size: 0.95rem; line-height: 1.7; padding: 16px; background: var(--bg-tertiary); border-radius: 8px; border-left: 3px solid var(--text-muted);">
+                            ${escapeHtml(project.description)}
+                        </div>
                     </div>
-                    <div style="padding: 12px; background: var(--bg-tertiary); border-radius: var(--radius-sm); border-left: 3px solid var(--success);">
-                        <strong style="font-size: 0.9rem;">🎨 Design Tokens</strong>
-                        <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 4px;">Colores, tipografía, espaciado</p>
+                    
+                    <!-- Interpretación generada - solo el primer párrafo -->
+                    <div style="margin-bottom: 24px;">
+                        <div style="color: var(--accent-primary); font-size: 0.8rem; font-weight: 600; margin-bottom: 8px; display: flex; align-items: center; gap: 6px;">
+                            <span>🎯</span> Interpretación
+                        </div>
+                        <div style="color: var(--text-primary); font-size: 0.95rem; line-height: 1.7; padding: 16px; background: linear-gradient(135deg, rgba(99, 102, 241, 0.06), rgba(139, 92, 246, 0.06)); border-radius: 8px; border: 1px solid rgba(99, 102, 241, 0.15);">
+                            ${escapeHtml(firstParagraph)}
+                            ${restContent ? `
+                            <details style="margin-top: 12px;">
+                                <summary style="cursor: pointer; color: var(--accent-primary); font-size: 0.85rem; font-weight: 500;">Ver más detalles</summary>
+                                <div style="margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--border-color); color: var(--text-secondary); font-size: 0.9rem; line-height: 1.6; white-space: pre-wrap;">${escapeHtml(restContent)}</div>
+                            </details>
+                            ` : ''}
+                        </div>
                     </div>
-                    <div style="padding: 12px; background: var(--bg-tertiary); border-radius: var(--radius-sm); border-left: 3px solid var(--warning);">
-                        <strong style="font-size: 0.9rem;">📊 Métricas</strong>
-                        <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 4px;">KPIs y métricas de éxito</p>
+                    
+                    ${project.data.needsSolved ? `
+                    <!-- Necesidades en formato más compacto -->
+                    <div>
+                        <div style="color: var(--success); font-size: 0.8rem; font-weight: 500; margin-bottom: 8px; display: flex; align-items: center; gap: 6px;">
+                            <span>✓</span> Qué resuelve
+                        </div>
+                        <div style="color: var(--text-secondary); font-size: 0.9rem; line-height: 1.7;">
+                            ${formatTextWithLists(project.data.needsSolved)}
+                        </div>
                     </div>
+                    ` : ''}
                 </div>
             </div>
-        </div>
-    `;
-    
-    overviewContent.innerHTML = `
-        <div style="display: grid; gap: 20px;">
-            <!-- Panel de Alineación (solo si hay datos generados y no está aprobado) -->
-            ${alignmentHTML}
-            
-            <!-- Información del Proyecto -->
+        `;
+    } else {
+        // Vista previa cuando aún no hay datos generados
+        mainContentHTML = `
             <div class="content-block" style="margin: 0;">
                 <div class="content-block-header">
                     <span class="content-block-title">📋 Información del Proyecto</span>
@@ -9262,22 +10831,57 @@ function populateOverview(project) {
                             <span style="color: var(--text-secondary); margin-left: 8px; text-transform: capitalize;">${escapeHtml(project.category || 'Sin categoría')}</span>
                         </div>
                         <div>
-                            <strong style="color: var(--accent-primary);">Descripción Original:</strong>
+                            <strong style="color: var(--accent-primary);">Descripción:</strong>
                             <p style="color: var(--text-secondary); margin-top: 8px; line-height: 1.6;">${escapeHtml(project.description)}</p>
                         </div>
-                        ${expandedDescInfo}
                     </div>
                 </div>
             </div>
             
-            <!-- Resultado Generado -->
-            ${generatedResultInfo}
+            <div class="content-block" style="margin: 0;">
+                <div class="content-block-header">
+                    <span class="content-block-title">🎯 Vista Previa del Flujo UX/UI</span>
+                </div>
+                <div class="content-block-body" style="padding: 16px;">
+                    <p style="color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 16px;">
+                        Se generará un flujo completo basado en tu descripción, incluyendo:
+                    </p>
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px;">
+                        <div style="padding: 12px; background: var(--bg-tertiary); border-radius: var(--radius-sm); border-left: 3px solid var(--accent-primary);">
+                            <strong style="font-size: 0.9rem;">📝 Descripción</strong>
+                            <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 4px;">Qué es, para quién, necesidades</p>
+                        </div>
+                        <div style="padding: 12px; background: var(--bg-tertiary); border-radius: var(--radius-sm); border-left: 3px solid var(--accent-secondary);">
+                            <strong style="font-size: 0.9rem;">📱 Flujos de Pantalla</strong>
+                            <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 4px;">MVP, Intermedio, Completo</p>
+                        </div>
+                        <div style="padding: 12px; background: var(--bg-tertiary); border-radius: var(--radius-sm); border-left: 3px solid var(--success);">
+                            <strong style="font-size: 0.9rem;">🎨 Design Tokens</strong>
+                            <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 4px;">Colores, tipografía, espaciado</p>
+                        </div>
+                        <div style="padding: 12px; background: var(--bg-tertiary); border-radius: var(--radius-sm); border-left: 3px solid var(--warning);">
+                            <strong style="font-size: 0.9rem;">📊 Métricas</strong>
+                            <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 4px;">KPIs y métricas de éxito</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+    
+    overviewContent.innerHTML = `
+        <div style="display: grid; gap: 20px;">
+            <!-- Panel de Alineación (solo si hay datos generados y no está aprobado) -->
+            ${alignmentHTML}
+            
+            <!-- Contenido Principal Integrado -->
+            ${mainContentHTML}
             
             <!-- Instrucciones -->
             <div style="padding: 16px; background: linear-gradient(135deg, rgba(99, 102, 241, 0.1), rgba(139, 92, 246, 0.1)); border-radius: var(--radius-md); border: 1px solid var(--accent-primary);">
                 <p style="color: var(--text-primary); font-size: 0.9rem; margin: 0;">
                     <strong>💡 Siguiente paso:</strong> Haz clic en <strong>"Aprobar y Continuar"</strong> para ver el flujo completo generado, 
-                    o en <strong>"Editar"</strong> si deseas modificar la información del proyecto.
+                    o en <strong>"Ajustar Manualmente"</strong> si deseas modificar la información.
                 </p>
             </div>
         </div>
@@ -9301,24 +10905,20 @@ function approveOverview() {
     
     // Mark as approved
     project.overviewApproved = true;
+    markUnsavedChanges();
     
-    // Save to storage
-    saveProjects();
     if (app) {
         app.currentProject = project;
-        app.saveData();
     }
     
     // Update UI
     const overview = document.getElementById('overviewSection');
     const mainTabs = document.getElementById('mainTabs');
-    const promptBuilder = document.getElementById('promptBuilder');
     const saveBtn = document.getElementById('saveBtn');
     const exportBtn = document.getElementById('exportBtn');
     
     if (overview) overview.style.display = 'none';
     if (mainTabs) mainTabs.style.display = 'block';
-    if (promptBuilder) promptBuilder.style.display = 'block';
     if (saveBtn) saveBtn.style.display = 'inline-flex';
     if (exportBtn) exportBtn.style.display = 'inline-flex';
     
@@ -9413,6 +11013,9 @@ function populateProjectFields(data) {
 function renderFlows(flows) {
     const container = document.getElementById('flowsContainer');
     if (!container) return;
+    
+    // Store flows globally for preview access
+    window.currentFlows = flows;
     
     const tier = state.currentFlowTier || 'mvp';
     const tierFlows = flows[tier] || [];
@@ -9509,123 +11112,46 @@ function renderFlows(flows) {
         
         ${flows._architecture ? `
         <div class="content-block" style="margin-top: 24px;">
-            <div class="content-block-header">
-                <span class="content-block-title">📜 Reglas Generales de la Aplicación</span>
+            <div class="content-block-header" style="display: flex; align-items: center; justify-content: space-between;">
+                <span class="content-block-title">💡 Reglas Clave para Diseñar</span>
+                <button class="header-btn" onclick="switchTab('generalRules')" style="font-size: 0.85rem; padding: 6px 12px;">
+                    Ver todas las reglas →
+                </button>
             </div>
             <div class="content-block-body">
+                <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 16px; font-style: italic;">
+                    Estas son las reglas más críticas al diseñar estos flujos. Para documentación completa, consulta la pestaña de Reglas Generales.
+                </p>
                 ${flows._architecture.generalRules ? `
-                <div style="padding: 12px; background: var(--bg-primary); border-radius: var(--radius-sm); margin-bottom: 16px; border-left: 3px solid var(--accent-primary);">
-                    <strong style="color: var(--accent-primary); font-size: 0.95rem;">🌍 Idioma Oficial</strong>
-                    <div style="margin-top: 8px; font-size: 0.85rem; color: var(--text-secondary);">
-                        <div style="margin-bottom: 6px;"><strong>Principal:</strong> ${flows._architecture.generalRules.language?.primary || 'Español'}</div>
-                        <div style="margin-bottom: 6px;"><strong>Formato fechas:</strong> ${flows._architecture.generalRules.language?.localization?.dateFormat || 'DD/MM/YYYY'}</div>
-                        <div style="margin-bottom: 6px;"><strong>Formato números:</strong> ${flows._architecture.generalRules.language?.localization?.numberFormat || '1.234,56'}</div>
-                        ${flows._architecture.generalRules.language?.rules ? `
-                        <details style="margin-top: 8px;">
-                            <summary style="cursor: pointer; color: var(--accent-primary);">Ver todas las reglas de idioma →</summary>
-                            <ul style="margin-top: 8px; padding-left: 20px; line-height: 1.8;">
-                                ${flows._architecture.generalRules.language.rules.map(rule => `<li>${rule}</li>`).join('')}
-                            </ul>
-                        </details>
-                        ` : ''}
-                    </div>
-                </div>
-                
-                <div style="padding: 12px; background: var(--bg-primary); border-radius: var(--radius-sm); margin-bottom: 16px; border-left: 3px solid var(--warning);">
-                    <strong style="color: var(--warning); font-size: 0.95rem;">🎨 Branding y Nombre Comercial</strong>
-                    <div style="margin-top: 8px; font-size: 0.85rem; color: var(--text-secondary);">
-                        ${flows._architecture.generalRules.branding?.naming ? `
-                        <div style="margin-bottom: 8px;"><strong>Regla:</strong> ${flows._architecture.generalRules.branding.naming.rule || 'Usar nombre comercial consistente'}</div>
-                        <div style="background: var(--bg-secondary); padding: 8px; border-radius: var(--radius-sm); margin-bottom: 8px;">
-                            <strong>Formatos de nombre:</strong><br>
-                            • Completo: ${flows._architecture.generalRules.branding.naming.formats?.full || 'N/A'}<br>
-                            • Corto: ${flows._architecture.generalRules.branding.naming.formats?.short || 'N/A'}<br>
-                            • Tagline: ${flows._architecture.generalRules.branding.naming.formats?.tagline || 'N/A'}<br>
-                            • Dominio: ${flows._architecture.generalRules.branding.naming.formats?.domain || 'N/A'}
+                <div style="display: grid; gap: 12px;">
+                    <div style="padding: 12px; background: var(--bg-primary); border-radius: var(--radius-sm); border-left: 3px solid var(--accent-primary);">
+                        <strong style="color: var(--accent-primary); font-size: 0.9rem; display: block; margin-bottom: 6px;">🌍 Idioma: ${flows._architecture.generalRules.language?.primary || 'Español (es-ES)'}</strong>
+                        <div style="font-size: 0.85rem; color: var(--text-secondary);">
+                            Fechas: ${flows._architecture.generalRules.language?.localization?.dateFormat || 'dd/MM/yyyy'} • 
+                            Números: ${flows._architecture.generalRules.language?.localization?.numberFormat || '1.234,56'}
                         </div>
-                        ` : ''}
-                        ${flows._architecture.generalRules.branding?.icon ? `
-                        <strong style="display: block; margin-top: 12px; color: var(--info);">📱 Ícono Representativo</strong>
-                        <div style="margin-top: 6px;"><strong>Estilo:</strong> ${flows._architecture.generalRules.branding.icon.specifications?.style || 'Moderno y minimalista'}</div>
-                        <div><strong>Colores:</strong> ${flows._architecture.generalRules.branding.icon.specifications?.colors || 'Colores de marca'}</div>
-                        <div><strong>Escalabilidad:</strong> ${flows._architecture.generalRules.branding.icon.specifications?.scalability || 'Todos los tamaños'}</div>
-                        ` : ''}
                     </div>
-                </div>
-                
-                ${flows._architecture.generalRules.seo ? `
-                <div style="padding: 12px; background: var(--bg-primary); border-radius: var(--radius-sm); margin-bottom: 16px; border-left: 3px solid var(--success);">
-                    <strong style="color: var(--success); font-size: 0.95rem;">🔍 Optimización SEO</strong>
-                    <div style="margin-top: 8px; font-size: 0.85rem; color: var(--text-secondary);">
-                        <div style="margin-bottom: 8px;"><strong>Regla:</strong> ${flows._architecture.generalRules.seo.rule || 'Optimizar para motores de búsqueda'}</div>
-                        ${flows._architecture.generalRules.seo.general ? `
-                        <strong>Reglas Generales:</strong>
-                        <ul style="margin-top: 6px; padding-left: 20px; line-height: 1.8;">
-                            ${flows._architecture.generalRules.seo.general.slice(0, 5).map(rule => `<li>${rule}</li>`).join('')}
-                        </ul>
-                        ` : ''}
-                        ${flows._architecture.generalRules.seo.contentRules || flows._architecture.generalRules.seo.technical ? `
-                        <details style="margin-top: 8px;">
-                            <summary style="cursor: pointer; color: var(--success);">Ver guías completas de SEO →</summary>
-                            <div style="margin-top: 12px;">
-                                ${flows._architecture.generalRules.seo.contentRules ? `
-                                <strong style="color: var(--info);">Reglas de Contenido:</strong>
-                                <ul style="margin-top: 6px; padding-left: 20px; line-height: 1.8;">
-                                    ${flows._architecture.generalRules.seo.contentRules.map(rule => `<li>${rule}</li>`).join('')}
-                                </ul>
-                                ` : ''}
-                                ${flows._architecture.generalRules.seo.technical ? `
-                                <strong style="display: block; margin-top: 12px; color: var(--info);">Técnico:</strong>
-                                <ul style="margin-top: 6px; padding-left: 20px; line-height: 1.8;">
-                                    ${flows._architecture.generalRules.seo.technical.slice(0, 6).map(rule => `<li>${rule}</li>`).join('')}
-                                </ul>
-                                ` : ''}
-                                ${flows._architecture.generalRules.seo.performance ? `
-                                <strong style="display: block; margin-top: 12px; color: var(--info);">Performance:</strong>
-                                <ul style="margin-top: 6px; padding-left: 20px; line-height: 1.8;">
-                                    ${flows._architecture.generalRules.seo.performance.slice(0, 5).map(rule => `<li>${rule}</li>`).join('')}
-                                </ul>
-                                ` : ''}
-                            </div>
-                        </details>
-                        ` : ''}
+                    
+                    ${flows._architecture.generalRules.branding?.naming ? `
+                    <div style="padding: 12px; background: var(--bg-primary); border-radius: var(--radius-sm); border-left: 3px solid var(--warning);">
+                        <strong style="color: var(--warning); font-size: 0.9rem; display: block; margin-bottom: 6px;">🎨 Nombre comercial consistente</strong>
+                        <div style="font-size: 0.85rem; color: var(--text-secondary);">
+                            Usar "<strong>${flows._architecture.generalRules.branding.naming.formats?.full || 'N/A'}</strong>" en toda la aplicación
+                            ${flows._architecture.generalRules.branding.naming.formats?.short ? ` • Corto: "<strong>${flows._architecture.generalRules.branding.naming.formats.short}</strong>"` : ''}
+                        </div>
                     </div>
-                </div>
-                ` : ''}
-                
-                ${flows._architecture.generalRules.contentGuidelines ? `
-                <div style="padding: 12px; background: var(--bg-primary); border-radius: var(--radius-sm); border-left: 3px solid var(--info);">
-                    <strong style="color: var(--info); font-size: 0.95rem;">✍️ Guías de Contenido</strong>
-                    <div style="margin-top: 8px; font-size: 0.85rem; color: var(--text-secondary);">
-                        ${flows._architecture.generalRules.contentGuidelines.tone?.characteristics ? `
-                        <strong>Tono de Comunicación:</strong>
-                        <ul style="margin-top: 6px; padding-left: 20px; line-height: 1.8;">
-                            ${flows._architecture.generalRules.contentGuidelines.tone.characteristics.map(char => `<li>${char}</li>`).join('')}
-                        </ul>
-                        ` : ''}
-                        ${flows._architecture.generalRules.contentGuidelines.copywriting ? `
-                        <details style="margin-top: 8px;">
-                            <summary style="cursor: pointer; color: var(--info);">Ver guías de copywriting →</summary>
-                            <div style="margin-top: 12px;">
-                                ${flows._architecture.generalRules.contentGuidelines.copywriting.buttons ? `
-                                <strong>Botones:</strong>
-                                <ul style="margin-top: 6px; padding-left: 20px; line-height: 1.8;">
-                                    ${flows._architecture.generalRules.contentGuidelines.copywriting.buttons.map(rule => `<li>${rule}</li>`).join('')}
-                                </ul>
-                                ` : ''}
-                                ${flows._architecture.generalRules.contentGuidelines.copywriting.errors ? `
-                                <strong style="display: block; margin-top: 8px;">Mensajes de Error:</strong>
-                                <ul style="margin-top: 6px; padding-left: 20px; line-height: 1.8;">
-                                    ${flows._architecture.generalRules.contentGuidelines.copywriting.errors.map(rule => `<li>${rule}</li>`).join('')}
-                                </ul>
-                                ` : ''}
-                            </div>
-                        </details>
-                        ` : ''}
+                    ` : ''}
+                    
+                    ${flows._architecture.generalRules.contentGuidelines?.tone?.characteristics ? `
+                    <div style="padding: 12px; background: var(--bg-primary); border-radius: var(--radius-sm); border-left: 3px solid var(--info);">
+                        <strong style="color: var(--info); font-size: 0.9rem; display: block; margin-bottom: 6px;">✍️ Tono de comunicación</strong>
+                        <div style="font-size: 0.85rem; color: var(--text-secondary);">
+                            ${flows._architecture.generalRules.contentGuidelines.tone.characteristics.slice(0, 2).join(' • ')}
+                        </div>
                     </div>
+                    ` : ''}
                 </div>
-                ` : ''}
-                ` : ''}
+                ` : '<div style="text-align: center; padding: 20px; color: var(--text-muted);">No hay reglas generales definidas</div>'}
             </div>
         </div>
         
@@ -10207,6 +11733,7 @@ function saveCurrentProject() {
     }
     if (!project) {
         console.log('No project to save');
+        showNotification('No hay proyecto activo para guardar', 'error');
         return;
     }
     
@@ -10222,18 +11749,8 @@ function saveCurrentProject() {
         metricsDetail: document.getElementById('metricsDetail')?.value || ''
     };
     
-    // Check if there are actual changes
+    // Merge with existing data (always save, don't check for changes)
     if (!project.data) project.data = {};
-    const hasChanges = Object.keys(newData).some(key => {
-        return project.data[key] !== newData[key];
-    });
-    
-    if (!hasChanges) {
-        console.log('No changes to save');
-        return;
-    }
-    
-    // Merge with existing data
     Object.assign(project.data, newData);
     project.updatedAt = new Date().toISOString();
     
@@ -10244,10 +11761,27 @@ function saveCurrentProject() {
     
     // Save to storage
     saveProjects();
+    
+    // Also save using app if available
     if (app) {
         app.currentProject = project;
         app.saveData();
-        app.showNotification('Proyecto guardado correctamente', 'success');
+    }
+    
+    // Show success notification
+    showNotification('Proyecto guardado correctamente', 'success');
+    
+    // Update button UI
+    const saveBtn = document.getElementById('saveBtn');
+    if (saveBtn) {
+        const originalText = saveBtn.innerHTML;
+        saveBtn.innerHTML = '✓ Guardado';
+        saveBtn.disabled = true;
+        
+        setTimeout(() => {
+            saveBtn.innerHTML = originalText;
+            saveBtn.disabled = false;
+        }, 2000);
     }
     
     // Update projects list if visible
@@ -10539,12 +12073,10 @@ function restoreVersion(versionId) {
     if (confirm(`¿Restaurar la versión "${version.name}"? Los cambios no guardados se perderán.`)) {
         project.data = JSON.parse(JSON.stringify(version.snapshot));
         
-        // Save
-        saveProjects();
+        markUnsavedChanges();
         if (app) {
             app.currentProject = project;
-            app.saveData();
-            app.showNotification(`Versión "${version.name}" restaurada`, 'success');
+            app.showNotification(`Versión "${version.name}" restaurada. Recuerda guardar los cambios.`, 'success');
         }
         
         // Refresh UI
@@ -10689,10 +12221,23 @@ function renderProjectsList() {
 }
 
 function loadProject(projectId) {
+    // Verificar si hay cambios sin guardar en el proyecto actual
+    if (state.hasUnsavedChanges && state.currentProjectId && state.currentProjectId !== projectId) {
+        const result = confirmWithSaveOption('cambiar de proyecto');
+        if (result === 'save') {
+            saveCurrentProject();
+        } else if (result === 'cancel') {
+            return; // No hacer nada
+        }
+        // Si result === 'nosave', continuar sin guardar
+    }
+    
     const project = state.projects.find(p => p.id === projectId);
     if (!project) return;
     
     state.currentProjectId = projectId;
+    state.hasUnsavedChanges = false; // Resetear al cargar nuevo proyecto
+    updateSaveButtonState();
     
     if (app) {
         app.currentProject = project;
@@ -10714,13 +12259,11 @@ function loadProject(projectId) {
     if (project.overviewApproved) {
         const overview = document.getElementById('overviewSection');
         const mainTabs = document.getElementById('mainTabs');
-        const promptBuilder = document.getElementById('promptBuilder');
         const saveBtn = document.getElementById('saveBtn');
         const exportBtn = document.getElementById('exportBtn');
         
         if (overview) overview.style.display = 'none';
         if (mainTabs) mainTabs.style.display = 'block';
-        if (promptBuilder) promptBuilder.style.display = 'block';
         if (saveBtn) saveBtn.style.display = 'inline-flex';
         if (exportBtn) exportBtn.style.display = 'inline-flex';
         
@@ -10742,6 +12285,9 @@ function loadProject(projectId) {
     // Update projects list to show active state
     renderProjectsList();
     
+    // Agregar al historial de navegación
+    pushNavigationState('project');
+    
     if (app) {
         app.showNotification(`Proyecto "${project.name}" cargado`, 'success');
     }
@@ -10753,6 +12299,57 @@ function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+}
+
+// Format text with numbered lists to HTML
+function formatTextWithLists(text) {
+    if (!text) return '';
+    
+    const lines = text.split('\n');
+    let html = '';
+    let inList = false;
+    let listItems = [];
+    
+    for (let line of lines) {
+        line = line.trim();
+        if (!line) continue; // Skip empty lines
+        
+        // Check if line starts with a number followed by . or )
+        const listMatch = line.match(/^(\d+)[\.\)]\s+(.+)$/);
+        
+        if (listMatch) {
+            if (!inList) {
+                inList = true;
+                listItems = [];
+            }
+            listItems.push(escapeHtml(listMatch[2]));
+        } else {
+            // Not a list item
+            if (inList) {
+                // Close previous list
+                html += '<ol style="margin: 8px 0; padding-left: 24px; list-style-type: decimal;">';
+                listItems.forEach(item => {
+                    html += `<li style="margin: 4px 0; display: list-item;">${item}</li>`;
+                });
+                html += '</ol>';
+                inList = false;
+                listItems = [];
+            }
+            
+            html += `<p style="margin: 8px 0;">${escapeHtml(line)}</p>`;
+        }
+    }
+    
+    // Close any remaining list
+    if (inList) {
+        html += '<ol style="margin: 8px 0; padding-left: 24px; list-style-type: decimal;">';
+        listItems.forEach(item => {
+            html += `<li style="margin: 4px 0; display: list-item;">${item}</li>`;
+        });
+        html += '</ol>';
+    }
+    
+    return html || escapeHtml(text);
 }
 
 // Check for import parameter on load
@@ -10798,6 +12395,178 @@ function checkForImport() {
     }
 }
 
+// ====================
+// PREVIEW TAB FUNCTIONS
+// ====================
+
+function initPreviewTab() {
+    const tierSelect = document.getElementById('previewTier');
+    const screenSelect = document.getElementById('previewScreen');
+    const templateSelect = document.getElementById('previewTemplate');
+    const deviceSelect = document.getElementById('previewDevice');
+    
+    // Auto-update on select changes
+    [tierSelect, screenSelect, templateSelect, deviceSelect].forEach(select => {
+        if (select) {
+            select.addEventListener('change', updatePreview);
+        }
+    });
+    
+    // Populate tier select on flows tab activation
+    const flowsTabBtn = document.querySelector('[data-tab="flows"]');
+    if (flowsTabBtn) {
+        const originalClick = flowsTabBtn.onclick;
+        flowsTabBtn.addEventListener('click', () => {
+            setTimeout(() => {
+                populatePreviewSelectors();
+            }, 100);
+        });
+    }
+}
+
+function populatePreviewSelectors() {
+    if (!window.currentFlows || !window.currentFlows._architecture) return;
+    
+    const tierSelect = document.getElementById('previewTier');
+    const flows = window.currentFlows;
+    
+    if (!tierSelect) return;
+    
+    // Populate tiers
+    tierSelect.innerHTML = '<option value="">Selecciona un tier</option>';
+    ['mvp', 'intermediate', 'complete'].forEach(tier => {
+        if (flows[tier] && flows[tier].length > 0) {
+            const option = document.createElement('option');
+            option.value = tier;
+            option.textContent = tier === 'mvp' ? 'MVP' : tier === 'intermediate' ? 'Intermedio' : 'Completo';
+            tierSelect.appendChild(option);
+        }
+    });
+    
+    // Clear screen select
+    const screenSelect = document.getElementById('previewScreen');
+    if (screenSelect) {
+        screenSelect.innerHTML = '<option value="">Primero selecciona un tier</option>';
+        screenSelect.disabled = true;
+    }
+}
+
+function updatePreview() {
+    const tierSelect = document.getElementById('previewTier');
+    const screenSelect = document.getElementById('previewScreen');
+    const templateSelect = document.getElementById('previewTemplate');
+    const deviceSelect = document.getElementById('previewDevice');
+    const iframe = document.getElementById('previewFrame');
+    
+    if (!tierSelect || !screenSelect || !templateSelect || !deviceSelect || !iframe) {
+        console.error('Preview elements not found');
+        return;
+    }
+    
+    const tier = tierSelect.value;
+    
+    // Update screen selector when tier changes
+    if (!screenSelect.value || tierSelect === document.activeElement) {
+        updateScreenSelector(tier);
+        return;
+    }
+    
+    const screenIndex = parseInt(screenSelect.value);
+    const template = templateSelect.value;
+    const device = deviceSelect.value;
+    
+    if (!tier || screenIndex === '' || isNaN(screenIndex)) {
+        iframe.srcdoc = '<body style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:system-ui;color:#666;text-align:center;"><div><div style="font-size:3rem;margin-bottom:1rem;">👁️</div><div>Selecciona un tier y una pantalla para ver la vista previa</div></div></body>';
+        return;
+    }
+    
+    if (!window.currentFlows || !window.currentFlows[tier]) {
+        iframe.srcdoc = '<body style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:system-ui;color:#666;"><div>No hay flujos disponibles</div></body>';
+        return;
+    }
+    
+    const flow = window.currentFlows[tier][screenIndex];
+    if (!flow) {
+        iframe.srcdoc = '<body style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:system-ui;color:#666;"><div>Pantalla no encontrada</div></body>';
+        return;
+    }
+    
+    const projectName = window.currentFlows._architecture?.metadata?.projectName || '';
+    const html = PreviewGenerator.generateHTMLPreview(flow, template, device, projectName);
+    iframe.srcdoc = html;
+}
+
+function updateScreenSelector(tier) {
+    const screenSelect = document.getElementById('previewScreen');
+    if (!screenSelect || !tier) return;
+    
+    screenSelect.innerHTML = '<option value="">Selecciona una pantalla</option>';
+    screenSelect.disabled = false;
+    
+    if (!window.currentFlows || !window.currentFlows[tier]) {
+        screenSelect.innerHTML = '<option value="">No hay pantallas disponibles</option>';
+        screenSelect.disabled = true;
+        return;
+    }
+    
+    const flows = window.currentFlows[tier];
+    flows.forEach((flow, index) => {
+        const option = document.createElement('option');
+        option.value = index;
+        option.textContent = `${index + 1}. ${flow.screen}`;
+        screenSelect.appendChild(option);
+    });
+}
+
+function downloadPreviewHTML() {
+    const iframe = document.getElementById('previewFrame');
+    if (!iframe || !iframe.srcdoc) {
+        alert('No hay vista previa disponible para descargar');
+        return;
+    }
+    
+    const html = iframe.srcdoc;
+    const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    
+    const tierSelect = document.getElementById('previewTier');
+    const screenSelect = document.getElementById('previewScreen');
+    const tier = tierSelect ? tierSelect.value : 'screen';
+    const screenText = screenSelect ? screenSelect.options[screenSelect.selectedIndex]?.text : 'preview';
+    const filename = `${tier}-${screenText.replace(/[^a-zA-Z0-9]/g, '_')}.html`;
+    
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+    
+    if (window.app) {
+        app.showNotification('✅ HTML descargado correctamente', 'success');
+    }
+}
+
+function copyPreviewHTML() {
+    const iframe = document.getElementById('previewFrame');
+    if (!iframe || !iframe.srcdoc) {
+        alert('No hay vista previa disponible para copiar');
+        return;
+    }
+    
+    const html = iframe.srcdoc;
+    
+    navigator.clipboard.writeText(html).then(() => {
+        if (window.app) {
+            app.showNotification('✅ HTML copiado al portapapeles', 'success');
+        } else {
+            alert('HTML copiado al portapapeles');
+        }
+    }).catch(err => {
+        console.error('Error copying to clipboard:', err);
+        alert('Error al copiar al portapapeles');
+    });
+}
+
 // Initialize on load
 document.addEventListener('DOMContentLoaded', () => {
     renderProjectsList();
@@ -10808,4 +12577,11 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // Verificar si hay proyecto para importar via URL
     ProjectSharing.importFromLink();
+    
+    // Inicializar navegación en home
+    pushNavigationState('home');
+    updateNavigationButtons();
+    
+    // Inicializar Preview Tab
+    initPreviewTab();
 });
